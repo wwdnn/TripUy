@@ -1,0 +1,715 @@
+1. Trip Wallet
+2. Trip Story
+3. Moment Log
+4. Worth It Score
+5. Travel Recap
+6. Budget Mood
+7. Split Together
+8. Memory Map
+
+
+Create Trip
+user bikin room
+Invite Member
+join via kode/QR
+Pair Couple
+optional relasi pasangan
+Add Expense
+siapa bayar
+untuk siapa
+split logic
+Balance Calculation
+siapa nombok siapa
+Settlement
+hasil akhir simpel
+
+
+
+# 1. Create Trip
+
+## Tujuan Fitur
+
+Membuat sebuah “ruang perjalanan” tempat semua aktivitas expense dilakukan bersama member lain.
+
+Trip menjadi pusat dari semua data:
+
+* member
+* group/pasangan
+* expense
+* settlement
+
+---
+
+## Alur User
+
+### Sebagai pembuat trip
+
+1. User menekan tombol “Create Trip”
+2. User mengisi:
+
+   * nama trip
+   * tanggal mulai
+   * tanggal selesai
+   * foto/banner trip (optional)
+   * deskripsi trip (optional)
+3. Sistem membuat:
+
+   * unique trip id
+   * join code
+   * QR invite
+4. User otomatis menjadi:
+
+   * owner trip
+   * admin pertama
+
+---
+
+## Tujuan Data yang Harus Ada
+
+### Data Trip
+
+* id trip
+* nama trip
+* owner
+* tanggal
+* status trip
+
+  * active
+  * finished
+  * archived
+* join code
+* qr invite
+
+---
+
+## Rules / Behavior
+
+### Owner punya hak:
+
+* invite member
+* kick member
+* edit trip
+* close trip
+
+### Trip tidak bisa dihapus jika:
+
+* sudah ada expense
+
+### Trip bisa di-close
+
+Ketika close:
+
+* expense tidak bisa diubah
+* settlement final muncul
+
+---
+
+# 2. Invite Member
+
+## Tujuan Fitur
+
+Mengizinkan orang lain masuk ke trip dengan cara simpel:
+
+* kode unik
+* QR
+
+Fokus fitur:
+
+* gampang join
+* minim ribet
+* cepat dipakai saat nongkrong/jalan
+
+---
+
+## Alur User
+
+### Cara Join dengan Kode
+
+1. User pilih “Join Trip”
+2. User input kode
+3. Sistem validasi:
+
+   * kode valid?
+   * trip masih aktif?
+4. User masuk ke room
+
+---
+
+### Cara Join dengan QR
+
+1. User scan QR
+2. Sistem buka halaman join
+3. User konfirmasi join
+4. Sistem tambahkan ke trip
+
+---
+
+## Tujuan Data yang Harus Ada
+
+### Data Member Trip
+
+* user id
+* trip id
+* role
+
+  * owner
+  * admin
+  * member
+* join date
+* nickname di trip
+* avatar optional
+
+---
+
+## Rules / Behavior
+
+### Member baru otomatis:
+
+* bisa lihat expense
+* bisa tambah expense
+* bisa lihat balance
+
+### Optional Approval
+
+Owner bisa aktifkan:
+
+* auto approve join
+* manual approve join
+
+---
+
+## Edge Case
+
+### Jika kode salah
+
+Tampilkan:
+
+* “Trip tidak ditemukan”
+
+### Jika user sudah join
+
+Tampilkan:
+
+* “Kamu sudah ada di trip ini”
+
+### Jika trip penuh
+
+Tampilkan:
+
+* “Trip sudah mencapai limit member”
+
+---
+
+# 3. Pair Group
+
+## Tujuan Fitur
+
+Membuat grouping antar member agar expense lebih fleksibel dan terasa personal.
+
+Contoh:
+
+* pasangan
+* tim mobil
+* tim kamar
+* keluarga
+* bestie group
+
+Fitur ini penting karena nanti split expense bisa:
+
+* per orang
+* per group
+
+---
+
+## Konsep Dasar
+
+Satu trip bisa punya banyak group.
+
+Satu member:
+
+* boleh tidak punya group
+* boleh masuk satu group
+* atau multiple group (optional future)
+
+---
+
+## Alur User
+
+### Create Group
+
+1. User pilih “Create Group”
+2. Isi:
+
+   * nama group
+   * icon/emoji
+3. Pilih member
+
+---
+
+## Contoh Group
+
+### Couple
+
+* Wildan
+* Helma
+
+### Mobil 1
+
+* A
+* B
+* C
+
+### Kamar Hotel
+
+* D
+* E
+
+---
+
+## Tujuan Data yang Harus Ada
+
+### Data Group
+
+* group id
+* trip id
+* nama
+* tipe group
+
+  * custom
+  * couple
+  * transport
+  * room
+* created by
+
+### Data Group Member
+
+* group id
+* member id
+
+---
+
+## Rules / Behavior
+
+### Group tidak wajib
+
+Trip tetap bisa jalan tanpa group.
+
+### Group hanya alat bantu
+
+Group tidak mempengaruhi ownership uang.
+Group hanya mempermudah split.
+
+---
+
+## UX Goal
+
+User harus merasa:
+
+> “oh enak, ga perlu pilih satu-satu lagi”
+
+---
+
+# 4. Add Expense
+
+## Tujuan Fitur
+
+Mencatat pengeluaran bersama secara fleksibel tetapi tetap gampang dipahami.
+
+Ini adalah core feature aplikasi.
+
+---
+
+# Struktur Konsep Expense
+
+Expense punya 2 pertanyaan utama:
+
+## A. Siapa yang bayar?
+
+payer
+
+## B. Pengeluaran ini dipakai siapa?
+
+participants
+
+---
+
+# Alur User
+
+## Step 1 — Input Basic Expense
+
+User isi:
+
+* title
+* nominal
+* kategori
+* tanggal
+* note optional
+* upload receipt optional
+
+---
+
+## Step 2 — Tentukan Payer
+
+Contoh:
+
+* Wildan bayar Rp500.000
+
+Bisa:
+
+* 1 payer
+* multiple payer (future)
+
+---
+
+## Step 3 — Tentukan Participants
+
+Expense dipakai siapa?
+
+Contoh:
+
+* semua member
+* group couple
+* hanya 3 orang
+
+---
+
+# Split Logic
+
+Ini bagian paling penting.
+
+---
+
+## A. Equal Split
+
+Contoh:
+Rp300.000 dibagi 3 orang
+
+hasil:
+
+* masing-masing Rp100.000
+
+---
+
+## B. Exact Amount
+
+Contoh:
+
+* A = 50rb
+* B = 100rb
+* C = 150rb
+
+---
+
+## C. Percentage
+
+Contoh:
+
+* A = 20%
+* B = 80%
+
+---
+
+## D. Group Split
+
+Contoh:
+Hotel untuk group kamar 1
+
+---
+
+# Tujuan Data yang Harus Ada
+
+### Expense
+
+* id
+* trip id
+* creator
+* amount
+* category
+* note
+* created date
+
+### Expense Payer
+
+* expense id
+* payer
+* amount paid
+
+### Expense Participant
+
+* expense id
+* participant
+* split type
+* amount share
+
+---
+
+# Rules / Behavior
+
+## Expense harus balance
+
+Total payer harus sama dengan total expense.
+
+## Split harus valid
+
+Total participant share harus sama dengan total expense.
+
+---
+
+# UX Goal
+
+User harus bisa input expense:
+
+* cepat
+* minim mikir
+* minim calculator manual
+
+---
+
+# 5. Balance Calculation
+
+## Tujuan Fitur
+
+Mengubah seluruh expense menjadi:
+
+* siapa berhutang
+* siapa harus dibayar
+* jumlah akhirnya
+
+Ini fitur “otak” aplikasi.
+
+---
+
+# Konsep Dasar
+
+Sistem menghitung:
+
+## Total Paid
+
+berapa uang yang dibayar user
+
+## Total Share
+
+berapa kewajiban user
+
+---
+
+# Rumus Dasar
+
+## Balance
+
+balance = paid - share
+
+---
+
+## Hasil
+
+### Jika positif
+
+user harus menerima uang
+
+### Jika negatif
+
+user harus membayar uang
+
+---
+
+# Contoh
+
+## Wildan
+
+* bayar 500rb
+* share 200rb
+  = +300rb
+
+## Helma
+
+* bayar 100rb
+* share 250rb
+  = -150rb
+
+---
+
+# Settlement Optimization
+
+Tujuan:
+mengurangi jumlah transfer.
+
+---
+
+## Contoh Awal
+
+### Tanpa optimasi
+
+A bayar B
+A bayar C
+D bayar B
+
+---
+
+## Setelah optimasi
+
+A cukup bayar B
+
+---
+
+# Output yang Diharapkan
+
+## Ringkasan
+
+* total pengeluaran
+* total per member
+* siapa nombok paling besar
+
+## Debt Flow
+
+* siapa bayar siapa
+* nominal final
+
+---
+
+# UX Goal
+
+Hasil akhir harus:
+
+* simpel
+* mudah dipahami
+* tidak terlihat seperti spreadsheet akuntansi
+
+---
+
+# 6. Settlement
+
+## Tujuan Fitur
+
+Menyelesaikan hutang antar member dengan jelas dan tidak membingungkan.
+
+Settlement adalah “penutup trip”.
+
+---
+
+# Alur User
+
+## Step 1
+
+User buka halaman settlement.
+
+## Step 2
+
+Sistem tampilkan:
+
+* siapa harus bayar siapa
+* nominal
+* status pembayaran
+
+---
+
+## Step 3
+
+User melakukan transfer real.
+
+---
+
+## Step 4
+
+User klik:
+
+* “Mark as Paid”
+
+---
+
+## Step 5
+
+Penerima konfirmasi:
+
+* “Accept Payment”
+
+---
+
+# Tujuan Data yang Harus Ada
+
+### Settlement
+
+* from user
+* to user
+* amount
+* status
+
+  * pending
+  * paid
+  * confirmed
+
+---
+
+# Rules / Behavior
+
+## Settlement generated otomatis
+
+Dari balance calculation.
+
+## Jika ada expense baru
+
+Settlement harus regenerate.
+
+---
+
+# UX Goal
+
+User harus merasa:
+
+> “oh jadi gue tinggal transfer segini aja”
+
+bukan:
+
+> “gue bingung ini hutangnya siapa ke siapa”
+
+---
+
+# Saran Urutan Implementasi
+
+## Phase 1 — Foundation
+
+1. Create Trip
+2. Invite Member
+
+Karena semua fitur bergantung ke trip dan member.
+
+---
+
+## Phase 2 — Core Financial
+
+3. Add Expense
+4. Balance Calculation
+
+Karena ini inti aplikasi.
+
+---
+
+## Phase 3 — Experience Improvement
+
+5. Pair Group
+6. Settlement
+
+Karena ini enhancement experience.
+
+---
+
+# Saran Penting untuk Junior Programmer / AI Murah
+
+Saat implementasi:
+
+* jangan langsung pikir UI bagus
+* jangan langsung pikir realtime
+* jangan langsung pikir optimasi
+
+Fokus dulu:
+
+1. data benar
+2. calculation benar
+3. flow mudah dipahami
+
+Karena aplikasi expense sharing gagal bukan karena UI jelek,
+tetapi karena:
+
+* perhitungan membingungkan
+* user tidak percaya hasilnya
+* settlement tidak jelas.
