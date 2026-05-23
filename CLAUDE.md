@@ -21,7 +21,7 @@
 - Styling : Tailwind CSS
 - UI Library : shadcn/ui
 - Chart library : apache echarts
-- Database : Supabase
+- Database : PostgreSql
 - ORM : Prisma
 - Auth : Better Auth
 - State Management : Zustand
