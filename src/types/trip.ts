@@ -33,6 +33,18 @@ export interface TripListItem extends Trip {
   currentUserRole: TripRole;
 }
 
+export interface TripInvitePreview {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date | null;
+  currency: string;
+  status: TripStatus;
+  memberCount: number;
+  ownerName: string;
+  isAlreadyMember: boolean;
+}
+
 export interface CreateTripInput {
   name: string;
   description?: string;

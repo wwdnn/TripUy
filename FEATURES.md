@@ -602,9 +602,257 @@ src/
 
 ---
 
-## Fitur Berikutnya (akan didetailkan setelah Create Trip selesai)
+## 3. Invite Member via Kode / QR (MVP)
 
-- [ ] Invite Member via Kode / QR
+### 3.1 Tujuan
+Memungkinkan OWNER (dan kelak member lain yang diizinkan) mengundang orang lain ke dalam sebuah trip secara mudah, baik dengan membagikan **kode invite**, **link invite**, maupun **QR code**, sehingga orang yang diundang dapat melihat preview trip sebelum bergabung.
+
+> Catatan ruang lingkup: fitur ini fokus pada **sisi mengundang dan membagikan** (generate, regenerate, share, preview trip dari kode). Proses **bergabung** (menjadi member baru) didetailkan pada fitur terpisah [Join Trip](#fitur-berikutnya-akan-didetailkan-setelah-invite-member-selesai), namun endpoint preview-by-code di sini menjadi prasyarat agar Join Trip bisa menampilkan info trip sebelum konfirmasi.
+
+### 3.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- Menampilkan kode invite trip (sudah di-generate saat trip dibuat) di halaman detail / panel invite
+- Salin kode invite ke clipboard
+- Membagikan **link invite** berisi kode (mis. `/join/<inviteCode>`) + tombol copy link
+- Menampilkan **QR code** yang merepresentasikan link invite (generate di client)
+- Regenerate kode invite — hanya OWNER (kode lama langsung tidak berlaku)
+- Preview trip berdasarkan kode invite (endpoint publik-terbatas untuk dikonsumsi Join Trip): nama trip, jumlah member, tanggal, currency — tanpa data sensitif
+- Web Share API di mobile (share link via aplikasi lain) dengan fallback copy
+- Panel "Kelola Undangan" hanya untuk OWNER
+
+**Tidak termasuk MVP (future):**
+- Eksekusi join / menambah member (ada di fitur Join Trip)
+- Invite via email / kirim notifikasi undangan
+- Multiple invite link dengan token & masa berlaku berbeda
+- Invite link dengan limit pemakaian (max uses)
+- Expiry / kadaluarsa otomatis kode invite
+- Role khusus saat invite (mis. langsung sebagai CO-OWNER)
+- Approval request join (OWNER menyetujui sebelum member masuk)
+- Riwayat / audit log undangan
+
+### 3.3 Entity / Data Model (Prisma)
+
+Fitur ini **tidak menambah tabel baru**. Memanfaatkan field `inviteCode` yang sudah ada di model `Trip`:
+
+```
+Trip
+  ...
+  inviteCode  String @unique   # sudah ada — dipakai untuk invite & join
+```
+
+**Catatan:**
+- Regenerate hanya meng-update nilai `inviteCode` pada record `Trip` (tetap unik global, retry jika collision) sehingga kode lama otomatis invalid.
+- Tidak ada perubahan migration untuk MVP fitur ini.
+- (Future) jika butuh multiple link / expiry / max-uses, baru ditambahkan tabel `TripInvite` terpisah.
+
+### 3.4 Halaman / Route
+
+| Route | Tipe | Akses | Deskripsi |
+|---|---|---|---|
+| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan panel invite (full untuk OWNER) |
+| `/join/[code]` | Protected | Authenticated | Halaman preview trip dari kode + tombol "Gabung" (aksi join di fitur Join Trip) |
+| `/api/trips/[id]/invite` | API | OWNER only | `POST` regenerate kode invite |
+| `/api/trips/invite/[code]` | API | Authenticated | `GET` preview trip dari kode invite (data ringkas, non-sensitif) |
+
+> Catatan: endpoint preview diletakkan di bawah `/api/trips/invite/[code]` (bukan `/api/trips/[id]`) karena pengakses belum tentu member dan hanya tahu kode, bukan `id`.
+
+### 3.5 User Flow
+
+#### A. Flow Menampilkan & Membagikan Invite (OWNER)
+1. OWNER membuka `/trips/[id]`
+2. Pada panel "Undang Member" tampil: kode invite, link invite, dan QR code
+3. OWNER dapat:
+   - Klik "Salin kode" → kode tersalin ke clipboard + toast "Kode disalin"
+   - Klik "Salin link" → link `${NEXT_PUBLIC_APP_URL}/join/<code>` tersalin
+   - Klik "Bagikan" (mobile) → buka Web Share API; fallback copy link bila tidak didukung
+   - Melihat QR code untuk discan langsung
+
+#### B. Flow Regenerate Kode (OWNER)
+1. OWNER klik "Buat ulang kode" di panel invite
+2. Tampilkan konfirmasi (bottom sheet di mobile): "Kode lama akan berhenti berlaku"
+3. Confirm → `POST /api/trips/[id]/invite`
+4. Server: assert OWNER → `generateInviteCode()` → update `Trip.inviteCode`
+5. Refresh data → kode, link, dan QR ter-update + toast "Kode invite diperbarui"
+
+#### C. Flow Preview Trip dari Kode (calon member)
+1. Orang yang diundang membuka link `/join/<code>` atau memasukkan kode di halaman join
+2. Jika belum login → redirect ke `/login?redirect=/join/<code>`
+3. Setelah login → halaman fetch `GET /api/trips/invite/<code>`
+4. Server cari trip by `inviteCode`:
+   - Tidak ada → 404 "Kode undangan tidak valid"
+   - Trip `ARCHIVED` → 409 "Trip ini sudah diarsipkan"
+   - Valid → kembalikan data ringkas (nama, tanggal, currency, jumlah member, nama OWNER)
+5. Tampilkan preview trip + status keanggotaan:
+   - Sudah member → tampilkan "Kamu sudah tergabung" + tombol "Buka trip"
+   - Belum member → tombol "Gabung ke trip" (aksi join → fitur Join Trip)
+
+### 3.6 Technical Flow
+
+**Stack:**
+- Server Component untuk halaman `/join/[code]` (initial preview fetch)
+- Client Component untuk panel invite (copy, share, QR, regenerate interaction)
+- React Query untuk mutation regenerate
+- QR digenerate di client (butuh konfirmasi penambahan dependency, lihat 3.7)
+- Reuse helper `generateInviteCode`, `getSessionUser`, `assertTripAccess`, dan format response `ok/created/fail/handleApiError`
+
+**Struktur file:**
+```
+src/
+  app/
+    (protected)/
+      trips/
+        [id]/page.tsx              # sisipkan <TripInvitePanel /> (sudah ada)
+      join/
+        [code]/page.tsx            # preview trip dari kode (Server Component)
+    api/
+      trips/
+        [id]/
+          invite/route.ts          # POST regenerate kode (OWNER only)
+        invite/
+          [code]/route.ts          # GET preview trip by kode
+  features/
+    trip/
+      components/
+        TripInvitePanel.tsx        # kode + link + QR + tombol (OWNER full, member view)
+        InviteCodeDisplay.tsx      # tampilan + copy kode
+        InviteQrCode.tsx           # render QR dari link
+        ShareInviteButton.tsx      # Web Share API + fallback
+        RegenerateInviteDialog.tsx # konfirmasi regenerate
+        JoinTripPreview.tsx        # kartu preview trip di /join/[code]
+      hooks/
+        useRegenerateInvite.ts     # React Query mutation
+        useCopyToClipboard.ts      # helper copy + state "copied"
+      services/
+        regenerateInviteCode.ts    # assert OWNER + generate + update
+        getTripByInviteCode.ts     # preview ringkas by kode
+  lib/
+    api/
+      trip/
+        regenerateInvite.ts        # client fetch wrapper
+        getTripByInviteCode.ts     # client fetch wrapper
+  types/
+    trip.ts                        # tambah TripInvitePreview
+```
+
+**Tambahan tipe (`src/types/trip.ts`):**
+```
+export interface TripInvitePreview {
+  id: string;
+  name: string;
+  startDate: Date;
+  endDate: Date | null;
+  currency: string;
+  status: TripStatus;
+  memberCount: number;
+  ownerName: string;
+  isAlreadyMember: boolean;
+}
+```
+
+**Authorization rules:**
+- `POST /api/trips/[id]/invite` (regenerate): wajib login + assert OWNER (`assertTripAccess` role OWNER)
+- `GET /api/trips/invite/[code]` (preview): wajib login; tidak harus member, tapi response hanya data ringkas non-sensitif (tanpa list expense / member detail)
+- Jangan kembalikan `inviteCode` trip lain atau data internal di preview
+
+**Invite link & QR:**
+- Link dibentuk dari `NEXT_PUBLIC_APP_URL` + `/join/<inviteCode>` (jangan hardcode origin)
+- QR code merepresentasikan link invite (bukan hanya kode mentah) agar bisa langsung dibuka
+- QR digenerate sepenuhnya di client (tidak perlu endpoint server)
+
+**Error handling:**
+- 401 jika belum login
+- 403 jika regenerate dilakukan non-OWNER
+- 404 jika kode invite tidak ditemukan → "Kode undangan tidak valid"
+- 409 jika trip sudah `ARCHIVED` → "Trip ini sudah diarsipkan"
+- Copy/Share gagal → fallback tampilkan kode + toast, jangan crash
+
+### 3.7 Dependencies & Environment
+
+**Environment Variables:**
+```
+NEXT_PUBLIC_APP_URL   # untuk membentuk link invite & isi QR
+```
+
+**Dependency baru (sudah dikonfirmasi):**
+- `qrcode.react` — komponen React siap pakai untuk render QR di client (dipilih). Install saat tahap implementasi dimulai.
+
+### 3.8 Acceptance Criteria MVP
+
+- [ ] OWNER melihat kode invite di panel detail trip
+- [ ] OWNER dapat menyalin kode invite ke clipboard
+- [ ] OWNER dapat menyalin link invite (`/join/<code>`)
+- [ ] Link invite dibentuk dari `NEXT_PUBLIC_APP_URL` (tidak hardcode)
+- [ ] QR code tampil dan merepresentasikan link invite
+- [ ] Tombol "Bagikan" memakai Web Share API di mobile dengan fallback copy
+- [ ] OWNER dapat regenerate kode; kode lama langsung tidak berlaku
+- [ ] Non-OWNER tidak melihat tombol regenerate (403 jika dipaksa via API)
+- [ ] Calon member dapat membuka `/join/<code>` dan melihat preview trip
+- [ ] Kode tidak valid menampilkan pesan "Kode undangan tidak valid"
+- [ ] Trip yang diarsipkan tidak bisa di-preview untuk join (409)
+- [ ] User yang sudah member melihat status "sudah tergabung" + tombol buka trip
+- [ ] Belum login saat buka `/join/<code>` → redirect login lalu balik ke halaman join
+- [ ] Preview tidak membocorkan data sensitif (expense, detail member)
+- [ ] Mobile-friendly (tap area ≥ 44px, QR cukup besar untuk discan)
+- [ ] Dark mode support (QR tetap kontras & terbaca)
+- [ ] Loading & error state konsisten
+
+> Catatan implementasi (disederhanakan, anti over-engineering):
+> - Halaman `/join/[code]` dibuat sebagai **Server Component** yang memanggil service `getTripByInviteCode` **langsung**, sehingga endpoint `GET /api/trips/invite/[code]` dan client-fetch preview **tidak dibuat** (tidak diperlukan).
+> - Mengikuti pola hook yang sudah ada (`useState`/`useTransition` + `router.refresh()`), **bukan** React Query (project belum memakai React Query provider).
+> - Panel invite dikonsolidasi jadi **satu komponen** `TripInvitePanel` (kode, copy, link, QR, share, regenerate) — tidak dipecah menjadi banyak file kecil.
+> - Trip `ARCHIVED` tetap bisa di-preview tapi tombol gabung dinonaktifkan di UI (tidak pakai error 409 / error class baru).
+
+**Types & Schema:**
+- [x] Tambah `TripInvitePreview` di `src/types/trip.ts`
+
+**Service Layer:**
+- [x] `regenerateInviteCode` (assert OWNER + `generateInviteCode` + update)
+- [x] `getTripByInviteCode` (preview ringkas + cek `isAlreadyMember`)
+
+**API Routes:**
+- [x] `POST /api/trips/[id]/invite` (regenerate, OWNER only)
+- [~] ~~`GET /api/trips/invite/[code]`~~ — tidak dibuat, preview dipanggil langsung dari Server Component
+
+**Client Fetch (`src/lib/api/trip`):**
+- [x] `regenerateInvite.ts`
+- [~] ~~`getTripByInviteCode.ts`~~ — tidak diperlukan (Server Component akses service langsung)
+
+**UI Pages:**
+- [x] `/join/[code]` preview page (Server Component)
+- [x] Sisipkan `TripInvitePanel` di `/trips/[id]` (OWNER only)
+
+**Components:**
+- [x] `TripInvitePanel` (gabungan: kode + copy + link + QR + share + regenerate)
+
+**Hooks:**
+- [x] `useRegenerateInvite` (pola `router.refresh()`)
+
+**Setup:**
+- [x] Install `qrcode.react`
+- [ ] Pastikan `NEXT_PUBLIC_APP_URL` ter-set di `.env.local` (cek environment)
+
+**QA (manual, belum dijalankan):**
+- [ ] Test copy kode & copy link
+- [ ] Test QR mengarah ke link yang benar
+- [ ] Test regenerate (kode lama jadi invalid)
+- [ ] Test regenerate oleh non-OWNER (403)
+- [ ] Test preview kode valid / tidak valid / archived
+- [ ] Test preview sebagai member vs non-member
+- [ ] Test redirect login dari `/join/<code>` lalu balik
+- [ ] Test dark mode panel invite & QR
+- [ ] Test mobile layout (panel, QR, share)
+
+### 3.10 Status
+
+**Current status:** Sebagian selesai — sisi mengundang & preview siap; eksekusi *join* menunggu fitur [Join Trip](#fitur-berikutnya-akan-didetailkan-setelah-invite-member-selesai) (tombol "Gabung" saat ini dinonaktifkan)
+**Target selesai:** TBD
+**Catatan:** Bergantung pada [Create Trip](#2-create-trip--room-mvp) (butuh `inviteCode` & detail trip). Tombol "Gabung ke trip" untuk non-member sengaja dinonaktifkan sampai fitur Join Trip dibuat.
+
+---
+
+## Fitur Berikutnya (akan didetailkan setelah Invite Member selesai)
+
 - [ ] Join Trip
 - [ ] Add Expense
 - [ ] Split Expense Logic

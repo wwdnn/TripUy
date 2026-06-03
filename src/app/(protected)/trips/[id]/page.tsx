@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import type { JSX } from "react";
 import { TripActionsMenu } from "@/features/trip/components/TripActionsMenu";
 import { TripHeader } from "@/features/trip/components/TripHeader";
+import { TripInvitePanel } from "@/features/trip/components/TripInvitePanel";
 import { getTripById } from "@/features/trip/services/getTripById";
 import { TripNotFoundError } from "@/features/trip/services/errors";
 import { requireSessionUser } from "@/lib/auth/getSessionUser";
@@ -33,6 +34,8 @@ export default async function TripDetailPage({ params }: TripDetailPageProps): P
       <TripHeader trip={trip} currentUserRole={role} />
 
       {isOwner ? <TripActionsMenu trip={trip} /> : null}
+
+      {isOwner ? <TripInvitePanel trip={trip} /> : null}
 
       <section className="border-border bg-card rounded-xl border p-6">
         <h2 className="text-base font-semibold">Pengeluaran</h2>
