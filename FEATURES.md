@@ -270,9 +270,340 @@ GOOGLE_CLIENT_SECRET
 
 ---
 
-## Fitur Berikutnya (akan didetailkan setelah Authentication selesai)
+## 2. Create Trip / Room (MVP)
 
-- [ ] Create Trip / Room
+### 2.1 Tujuan
+Memungkinkan user yang sudah login untuk membuat sebuah "trip" (room perjalanan) sebagai wadah utama bagi semua aktivitas: mencatat pengeluaran, mengundang member, menghitung balance, hingga settlement.
+
+### 2.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- User authenticated dapat membuat trip baru
+- Form input: nama trip, deskripsi (opsional), tanggal mulai, tanggal selesai (opsional), mata uang default
+- Auto-generate kode invite unik (untuk dipakai fitur invite di iterasi berikutnya)
+- Creator otomatis menjadi member pertama dengan role `OWNER`
+- Halaman list trip milik user (yang dibuat atau diikuti)
+- Halaman detail trip (header info trip + placeholder untuk fitur lain)
+- Edit trip (nama, deskripsi, tanggal, mata uang) — hanya OWNER
+- Delete trip — hanya OWNER, dengan konfirmasi
+- Status trip: `ACTIVE` (default) dan `ARCHIVED` (untuk trip yang sudah selesai)
+- Archive / Unarchive trip — hanya OWNER
+
+**Tidak termasuk MVP (future):**
+- Invite member via kode / QR (fitur terpisah berikutnya)
+- Upload cover image trip
+- Kategori trip (liburan, kerja, dll)
+- Multi-currency per expense
+- Duplicate trip
+- Transfer ownership ke member lain
+- Trip template
+- Trip privacy setting (public / private)
+
+### 2.3 Entity / Data Model (Prisma)
+
+```
+Trip
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  startDate       DateTime
+  endDate         DateTime?
+  currency        String   @default("IDR")
+  inviteCode      String   @unique
+  status          TripStatus @default(ACTIVE)
+  createdById     String
+  createdBy       User     @relation(fields: [createdById], references: [id])
+  members         TripMember[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([createdById])
+  @@index([status])
+
+TripMember
+  id              String   @id @default(cuid())
+  tripId          String
+  userId          String
+  role            TripRole @default(MEMBER)
+  joinedAt        DateTime @default(now())
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@unique([tripId, userId])
+  @@index([userId])
+
+enum TripStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum TripRole {
+  OWNER
+  MEMBER
+}
+```
+
+**Catatan:**
+- `inviteCode` di-generate saat trip dibuat (misal 8 karakter alfanumerik), unik global
+- Saat trip dibuat, otomatis insert 1 record `TripMember` dengan role `OWNER`
+- `onDelete: Cascade` pada TripMember agar member ter-clean saat trip dihapus
+
+### 2.4 Halaman / Route
+
+| Route | Tipe | Akses | Deskripsi |
+|---|---|---|---|
+| `/trips` | Protected | Authenticated | List semua trip milik user |
+| `/trips/new` | Protected | Authenticated | Form buat trip baru |
+| `/trips/[id]` | Protected | Member only | Detail trip |
+| `/trips/[id]/edit` | Protected | OWNER only | Form edit trip |
+| `/api/trips` | API | Authenticated | GET (list), POST (create) |
+| `/api/trips/[id]` | API | Member only | GET (detail), PATCH (update), DELETE |
+| `/api/trips/[id]/archive` | API | OWNER only | POST archive/unarchive |
+
+### 2.5 User Flow
+
+#### A. Flow Create Trip
+1. User di `/dashboard` atau `/trips` klik tombol "Buat Trip Baru"
+2. Redirect ke `/trips/new`
+3. User mengisi form: `name` (wajib), `description` (opsional), `startDate` (wajib), `endDate` (opsional), `currency` (default IDR)
+4. Client-side: validasi Zod (name min 3 char, endDate >= startDate jika ada)
+5. Submit → call `POST /api/trips`
+6. Server:
+   - Validasi ulang dengan Zod
+   - Cek auth session
+   - Generate `inviteCode` unik (retry jika collision)
+   - Insert `Trip` + insert `TripMember` (role OWNER) dalam transaction
+7. Response sukses → redirect ke `/trips/[id]`
+8. Tampilkan toast "Trip berhasil dibuat"
+
+#### B. Flow List Trip
+1. User membuka `/trips`
+2. Server Component fetch list trip via service: `getTripsByUserId(userId)`
+3. Query mengambil semua trip yang user-nya jadi member, di-order berdasar `updatedAt DESC`
+4. Tampilkan dalam card list (mobile-first):
+   - Nama trip, tanggal, jumlah member, role user, status badge
+5. Filter UI: tab "Aktif" | "Diarsipkan"
+6. Empty state jika belum punya trip → CTA "Buat Trip Baru"
+
+#### C. Flow Detail Trip
+1. User klik salah satu trip di list → `/trips/[id]`
+2. Server Component fetch detail trip via `getTripById(id, userId)`
+3. Cek user adalah member dari trip tersebut, jika tidak → 404 / redirect
+4. Tampilkan header: nama, tanggal, currency, jumlah member, kode invite (jika OWNER)
+5. Section placeholder untuk fitur berikutnya (expense list, balance, dll)
+6. Tombol aksi (kondisional berdasar role):
+   - OWNER: Edit, Archive, Delete
+   - MEMBER: hanya view + Leave trip (future)
+
+#### D. Flow Edit Trip
+1. OWNER klik tombol "Edit" di detail trip → `/trips/[id]/edit`
+2. Form prefilled dengan data trip
+3. Submit → `PATCH /api/trips/[id]`
+4. Server validasi: user adalah OWNER, payload valid
+5. Update record → redirect balik ke `/trips/[id]` + toast sukses
+
+#### E. Flow Archive Trip
+1. OWNER klik tombol "Arsipkan" di detail trip
+2. Tampilkan konfirmasi (bottom sheet di mobile)
+3. Confirm → `POST /api/trips/[id]/archive`
+4. Server set `status = ARCHIVED`
+5. Refresh data → trip pindah ke tab "Diarsipkan"
+
+#### F. Flow Delete Trip
+1. OWNER klik tombol "Hapus" di detail trip
+2. Tampilkan konfirmasi dengan input ketik ulang nama trip
+3. Confirm → `DELETE /api/trips/[id]`
+4. Server validasi: user adalah OWNER
+5. Hapus trip (cascade hapus TripMember)
+6. Redirect ke `/trips` + toast "Trip telah dihapus"
+
+### 2.6 Technical Flow
+
+**Stack:**
+- Server Component untuk list & detail (initial fetch)
+- Client Component untuk form (interaction)
+- React Query untuk mutation (create, update, archive, delete)
+- Zod untuk validation di client & server
+- Prisma transaction saat create (Trip + TripMember atomik)
+
+**Struktur file:**
+```
+src/
+  app/
+    (protected)/
+      trips/
+        page.tsx                   # List trip
+        new/page.tsx               # Create form
+        [id]/
+          page.tsx                 # Detail
+          edit/page.tsx            # Edit form
+    api/
+      trips/
+        route.ts                   # GET list, POST create
+        [id]/
+          route.ts                 # GET, PATCH, DELETE
+          archive/route.ts         # POST archive/unarchive
+  features/
+    trip/
+      components/
+        TripCard.tsx
+        TripList.tsx
+        TripForm.tsx               # Reusable create + edit
+        TripHeader.tsx
+        TripEmptyState.tsx
+        TripStatusBadge.tsx
+        TripActionsMenu.tsx
+        DeleteTripDialog.tsx
+        ArchiveTripDialog.tsx
+      hooks/
+        useCreateTrip.ts
+        useUpdateTrip.ts
+        useDeleteTrip.ts
+        useArchiveTrip.ts
+      schemas/
+        tripSchema.ts              # createTripSchema, updateTripSchema
+      services/
+        createTrip.ts
+        getTripById.ts
+        getTripsByUserId.ts
+        updateTrip.ts
+        deleteTrip.ts
+        archiveTrip.ts
+        generateInviteCode.ts
+      stores/
+        useTripUiStore.ts          # UI state: active tab, filter, dll
+  lib/
+    api/
+      trip/
+        createTrip.ts              # Client fetch wrapper
+        getTrips.ts
+        updateTrip.ts
+        deleteTrip.ts
+        archiveTrip.ts
+  types/
+    trip.ts                        # Trip, TripMember, TripRole, TripStatus
+```
+
+**Validation (Zod):**
+- `createTripSchema`: name (min 3, max 60), description (max 500, optional), startDate (date), endDate (date, optional, >= startDate), currency (3 char ISO)
+- `updateTripSchema`: semua field optional, partial update
+
+**Authorization rules:**
+- Semua endpoint cek session (`auth.api.getSession`)
+- GET detail: user harus member dari trip
+- PATCH / DELETE / Archive: user harus OWNER
+- Helper service `assertTripOwner(tripId, userId)` dan `assertTripMember(tripId, userId)`
+
+**Invite code generation:**
+- 8 karakter, alfanumerik uppercase (exclude ambigu: 0, O, I, 1)
+- Loop generate sampai unik di database (max retry 5x)
+- Disimpan di Trip, dipakai untuk fitur invite di iterasi berikutnya
+
+**Error handling:**
+- 401 jika belum login
+- 403 jika bukan OWNER untuk aksi sensitif
+- 404 jika trip tidak ada atau user bukan member
+- 422 jika validation gagal
+- Pesan user-friendly: "Trip tidak ditemukan", "Anda tidak memiliki akses ke trip ini"
+
+### 2.7 Acceptance Criteria MVP
+
+- [ ] User authenticated dapat membuat trip baru via form
+- [ ] Creator otomatis menjadi OWNER dan member pertama
+- [ ] Invite code ter-generate unik saat trip dibuat
+- [ ] User dapat melihat list trip yang diikuti
+- [ ] User dapat melihat detail trip (jika member)
+- [ ] User bukan member tidak bisa akses detail trip
+- [ ] OWNER dapat edit data trip
+- [ ] OWNER dapat archive / unarchive trip
+- [ ] OWNER dapat menghapus trip dengan konfirmasi
+- [ ] MEMBER (non-OWNER) tidak melihat tombol edit/delete/archive
+- [ ] Validation form jalan di client dan server
+- [ ] Empty state tampil saat user belum punya trip
+- [ ] Filter tab Aktif / Diarsipkan berfungsi
+- [ ] Mobile-friendly (tap area ≥ 44px, sticky CTA di form)
+- [ ] Dark mode support
+- [ ] Responsive (mobile-first)
+- [ ] Loading state dan error state konsisten
+
+### 2.8 Checklist Implementasi
+
+**Database:**
+- [ ] Tambah model `Trip`, `TripMember` di Prisma schema
+- [ ] Tambah enum `TripStatus`, `TripRole`
+- [ ] Tambah relasi ke `User`
+- [ ] Run migration
+
+**Types & Schema:**
+- [ ] Buat `src/types/trip.ts`
+- [ ] Buat `createTripSchema`, `updateTripSchema` (Zod)
+
+**Service Layer:**
+- [ ] `createTrip` (dengan transaction Trip + TripMember)
+- [ ] `getTripById` (dengan assert member)
+- [ ] `getTripsByUserId` (filter by status)
+- [ ] `updateTrip` (dengan assert OWNER)
+- [ ] `deleteTrip` (dengan assert OWNER)
+- [ ] `archiveTrip` (toggle status, assert OWNER)
+- [ ] `generateInviteCode` (helper unik)
+- [ ] Helper `assertTripOwner`, `assertTripMember`
+
+**API Routes:**
+- [ ] `GET /api/trips`
+- [ ] `POST /api/trips`
+- [ ] `GET /api/trips/[id]`
+- [ ] `PATCH /api/trips/[id]`
+- [ ] `DELETE /api/trips/[id]`
+- [ ] `POST /api/trips/[id]/archive`
+
+**UI Pages:**
+- [ ] `/trips` list page (Server Component)
+- [ ] `/trips/new` create page
+- [ ] `/trips/[id]` detail page (Server Component)
+- [ ] `/trips/[id]/edit` edit page
+
+**Components:**
+- [ ] `TripCard`
+- [ ] `TripList` + tab filter
+- [ ] `TripForm` (reusable create + edit)
+- [ ] `TripHeader`
+- [ ] `TripEmptyState`
+- [ ] `TripStatusBadge`
+- [ ] `TripActionsMenu`
+- [ ] `DeleteTripDialog` (confirm ketik nama)
+- [ ] `ArchiveTripDialog`
+
+**Hooks:**
+- [ ] `useCreateTrip` (React Query mutation)
+- [ ] `useUpdateTrip`
+- [ ] `useDeleteTrip`
+- [ ] `useArchiveTrip`
+
+**Store:**
+- [ ] `useTripUiStore` (active tab filter)
+
+**QA:**
+- [ ] Test create trip sukses
+- [ ] Test create trip dengan validation error
+- [ ] Test list trip (member, OWNER, empty)
+- [ ] Test detail trip oleh non-member (harus 404)
+- [ ] Test edit oleh non-OWNER (harus 403)
+- [ ] Test archive & unarchive
+- [ ] Test delete dengan konfirmasi
+- [ ] Test invite code unik (tidak collision)
+- [ ] Test dark mode di semua halaman trip
+- [ ] Test mobile layout (form, list, detail)
+
+### 2.9 Status
+
+**Current status:** Belum dimulai
+**Target selesai:** TBD
+**Catatan:** Fitur ini bergantung pada [Authentication](#1-authentication-mvp) yang harus selesai terlebih dahulu. Hasil fitur ini menjadi prasyarat untuk fitur Invite Member, Add Expense, Balance, dan Settlement.
+
+---
+
+## Fitur Berikutnya (akan didetailkan setelah Create Trip selesai)
+
 - [ ] Invite Member via Kode / QR
 - [ ] Join Trip
 - [ ] Add Expense
