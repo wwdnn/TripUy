@@ -20,16 +20,19 @@ model Trip {
 }
 
 model TripMember {
-  id       String   @id @default(cuid())
-  tripId   String
-  userId   String
-  role     TripRole @default(MEMBER)
-  joinedAt DateTime @default(now())
+  id        String   @id @default(cuid())
+  tripId    String
+  userId    String?
+  guestId   String?
+  guestName String?
+  role      TripRole @default(MEMBER)
+  joinedAt  DateTime @default(now())
 
-  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  user User @relation(fields: [userId], references: [id])
+  trip Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User? @relation(fields: [userId], references: [id])
 
   @@unique([tripId, userId])
+  @@unique([tripId, guestId])
   @@index([userId])
   @@map("trip_member")
 }

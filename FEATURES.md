@@ -845,15 +845,67 @@ NEXT_PUBLIC_APP_URL   # untuk membentuk link invite & isi QR
 
 ### 3.10 Status
 
-**Current status:** Sebagian selesai — sisi mengundang & preview siap; eksekusi *join* menunggu fitur [Join Trip](#fitur-berikutnya-akan-didetailkan-setelah-invite-member-selesai) (tombol "Gabung" saat ini dinonaktifkan)
+**Current status:** Selesai — sisi mengundang & preview siap; eksekusi *join* ditangani fitur [Join Trip](#4-join-trip-user--guest-mvp)
 **Target selesai:** TBD
-**Catatan:** Bergantung pada [Create Trip](#2-create-trip--room-mvp) (butuh `inviteCode` & detail trip). Tombol "Gabung ke trip" untuk non-member sengaja dinonaktifkan sampai fitur Join Trip dibuat.
+**Catatan:** Bergantung pada [Create Trip](#2-create-trip--room-mvp) (butuh `inviteCode` & detail trip). Tombol "Gabung" kini aktif via fitur Join Trip.
 
 ---
 
-## Fitur Berikutnya (akan didetailkan setelah Invite Member selesai)
+## 4. Join Trip (User & Guest) (MVP)
 
-- [ ] Join Trip
+### 4.1 Tujuan
+Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik sebagai **user terdaftar** (sudah/akan login) maupun sebagai **tamu (guest)** tanpa membuat akun terlebih dahulu — cukup mengisi nama.
+
+### 4.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- Halaman join **publik** `/join/[code]` (dapat diakses tanpa login)
+- Join sebagai **user login**: satu klik "Gabung ke trip" → otomatis menjadi member → diarahkan ke `/trips/[id]`
+- Join sebagai **guest**: isi nama → menjadi member tanpa akun, identitas disimpan via cookie `tripuy_guest_id`
+- Idempotent: membuka ulang link tidak menggandakan membership (dedup via `userId` atau `guestId`)
+- State preview untuk: sudah jadi member, trip diarsipkan, kode tidak valid
+
+**Tidak termasuk (kelak):**
+- Dashboard trip penuh untuk guest (saat ini guest hanya melihat konfirmasi "sudah gabung")
+- Approval OWNER sebelum member masuk
+- Konversi guest → akun (migrasi membership saat guest mendaftar)
+
+### 4.3 Perubahan Data
+- `TripMember.userId` → **nullable** (null untuk guest)
+- Tambah `TripMember.guestId` (nilai cookie guest) & `TripMember.guestName`
+- Unique baru `@@unique([tripId, guestId])` untuk dedup guest per trip
+- Migrasi: `add_guest_member` (additive, non-destruktif)
+
+### 4.4 Endpoint
+| Method | Path | Akses | Keterangan |
+| --- | --- | --- | --- |
+| POST | `/api/trips/join` | Publik | Join sebagai user (jika ada sesi) atau guest (butuh `guestName`); set cookie guest bila perlu |
+
+### 4.5 Struktur File
+- `app/join/[code]/page.tsx` — Server Component preview (publik)
+- `features/trip/components/JoinTripPanel.tsx` — area aksi join (user/guest/sudah-member/archived)
+- `features/trip/services/joinTrip.ts` — logika join idempotent
+- `features/trip/schemas/joinTripSchema.ts` — validasi Zod
+- `features/trip/hooks/useJoinTrip.ts` — mutation client
+- `lib/api/trip/joinTrip.ts` — fetch function
+- `lib/auth/guestSession.ts` — baca cookie `tripuy_guest_id`
+
+### 4.6 QA (manual, belum dijalankan)
+- [ ] Join sebagai user login → jadi member → redirect ke trip
+- [ ] Join sebagai guest (isi nama) → jadi member → konfirmasi
+- [ ] Buka ulang link sebagai guest → dikenali, tidak duplikat
+- [ ] Trip archived → tidak bisa join
+- [ ] Kode tidak valid → tampil InvalidInvite
+- [ ] Dark mode & layout mobile panel join
+
+### 4.7 Status
+**Current status:** Selesai (implementasi); QA manual menunggu
+**Catatan:** Bergantung pada [Invite Member](#3-invite-member-via-kode--qr-mvp) (preview-by-code) & [Create Trip](#2-create-trip--room-mvp).
+
+---
+
+## Fitur Berikutnya
+
 - [ ] Add Expense
 - [ ] Split Expense Logic
 - [ ] Balance Calculation

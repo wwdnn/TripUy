@@ -19,7 +19,9 @@ export interface Trip {
 export interface TripMember {
   id: string;
   tripId: string;
-  userId: string;
+  userId: string | null;
+  guestId: string | null;
+  guestName: string | null;
   role: TripRole;
   joinedAt: Date;
 }
@@ -43,6 +45,19 @@ export interface TripInvitePreview {
   memberCount: number;
   ownerName: string;
   isAlreadyMember: boolean;
+  memberName: string | null;
+}
+
+export interface JoinIdentity {
+  userId: string | null;
+  guestId: string | null;
+}
+
+export interface JoinTripResult {
+  tripId: string;
+  memberName: string;
+  isGuest: boolean;
+  alreadyMember: boolean;
 }
 
 export interface CreateTripInput {

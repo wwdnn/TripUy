@@ -1,9 +1,11 @@
 import Link from "next/link";
 import type { JSX } from "react";
 import { Button } from "@/components/ui/button";
+import { JoinTripPanel } from "@/features/trip/components/JoinTripPanel";
 import { getTripByInviteCode } from "@/features/trip/services/getTripByInviteCode";
 import { TripNotFoundError } from "@/features/trip/services/errors";
-import { requireSessionUser } from "@/lib/auth/getSessionUser";
+import { getSessionUser } from "@/lib/auth/getSessionUser";
+import { getGuestId } from "@/lib/auth/guestSession";
 import type { TripInvitePreview } from "@/types/trip";
 
 interface JoinPageProps {
@@ -25,25 +27,24 @@ function InvalidInvite(): JSX.Element {
         Kode mungkin salah atau sudah diperbarui oleh pemilik trip. Minta kode terbaru lalu coba lagi.
       </p>
       <Button asChild variant="outline" className="h-11">
-        <Link href="/trips">Ke daftar trip</Link>
+        <Link href="/">Ke beranda</Link>
       </Button>
     </main>
   );
 }
 
 export default async function JoinPage({ params }: JoinPageProps): Promise<JSX.Element> {
-  const user = await requireSessionUser();
   const { code } = await params;
+  const user = await getSessionUser();
+  const guestId = await getGuestId();
 
   let preview: TripInvitePreview;
   try {
-    preview = await getTripByInviteCode(code, user.id);
+    preview = await getTripByInviteCode(code, { userId: user?.id ?? null, guestId });
   } catch (error) {
     if (error instanceof TripNotFoundError) return <InvalidInvite />;
     throw error;
   }
-
-  const isArchived = preview.status === "ARCHIVED";
 
   return (
     <main className="mx-auto flex w-full max-w-md flex-col gap-6 px-4 py-12">
@@ -71,22 +72,14 @@ export default async function JoinPage({ params }: JoinPageProps): Promise<JSX.E
         </div>
       </div>
 
-      {isArchived ? (
-        <p className="text-muted-foreground text-center text-sm">Trip ini sudah diarsipkan.</p>
-      ) : preview.isAlreadyMember ? (
-        <Button asChild className="h-12 w-full">
-          <Link href={`/trips/${preview.id}`}>Buka trip</Link>
-        </Button>
-      ) : (
-        <div className="flex flex-col gap-2">
-          <Button type="button" className="h-12 w-full" disabled>
-            Gabung ke trip
-          </Button>
-          <p className="text-muted-foreground text-center text-xs">
-            Fitur gabung trip akan segera tersedia.
-          </p>
-        </div>
-      )}
+      <JoinTripPanel
+        inviteCode={code}
+        tripId={preview.id}
+        isLoggedIn={Boolean(user)}
+        isArchived={preview.status === "ARCHIVED"}
+        isAlreadyMember={preview.isAlreadyMember}
+        memberName={preview.memberName}
+      />
     </main>
   );
 }
