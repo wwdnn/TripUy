@@ -1586,9 +1586,280 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 
 ---
 
+## 7. Split Expense Logic (MVP)
+
+### 7.1 Tujuan
+Memperluas pencatatan pengeluaran agar pembagian biaya tidak hanya **rata (equal)**, tetapi juga mendukung **nominal pasti per peserta (exact)**, **persentase (percentage)**, dan **bobot/share (weight)**. Selain itu, fitur ini **mengkonsumsi kontrak grup** dari [Group Member](#6-group-member-mvp): satu grup dihitung sebagai **satu unit peserta**, sehingga pembagian terjadi di level unit (member individual + grup), bukan selalu per orang.
+
+> Catatan ruang lingkup: fitur ini fokus pada **cara membagi nominal sebuah expense** ke peserta/unit dan menyimpannya sebagai `ExpenseShare`. Perhitungan **balance** (siapa berutang ke siapa) dan **settlement** tetap fitur terpisah; fitur ini hanya menentukan besaran tanggungan tiap unit secara akurat (jumlah seluruh share selalu = nominal expense). Fitur ini **memperkaya** [Add Expense](#5-add-expense-mvp) yang sudah ada — bukan menggantinya — dengan menambah pilihan tipe pembagian pada form yang sama.
+
+### 7.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- Pemilihan **tipe pembagian** saat tambah / edit expense: `EQUAL`, `EXACT`, `PERCENTAGE`, `SHARE`
+- **EQUAL** — rata ke semua unit peserta (perilaku existing, kini berbasis unit)
+- **EXACT** — input nominal pasti per unit; jumlah input wajib **persis sama** dengan nominal expense
+- **PERCENTAGE** — input persen per unit; jumlah persen wajib **= 100%**
+- **SHARE** — input bobot bilangan bulat per unit (mis. 2:1:1); nominal dibagi proporsional terhadap total bobot
+- **Unit pembagian** = member individual (tanpa grup) + grup (≥1 anggotanya menjadi peserta). Grup = **1 unit**, tagihannya tanggungan bersama; anggota se-grup tidak saling berutang
+- Pembagian deterministik dengan **penanganan sisa** (remainder) sehingga `sum(shares) === amount` (tidak ada rupiah hilang/lebih) untuk semua tipe
+- Menyimpan **input mentah** pembagian (`splitValue`) per unit agar form edit dapat di-prefill ulang sesuai tipe
+- Menampilkan ringkasan pembagian (per unit + indikator grup) di detail expense
+- Validasi tipe pembagian di client & server (sum exact = amount, sum persen = 100%, bobot > 0, minimal 1 unit)
+
+**Tidak termasuk MVP (future):**
+- Perhitungan balance & settlement (fitur terpisah)
+- Pembagian internal di dalam grup (siapa di grup menanggung berapa) — grup tetap satu pihak
+- Menandai satu unit "tidak ikut" pada subset item dalam satu expense (item-level split / itemized)
+- Pembulatan mata uang non-default atau sub-unit (tetap integer minor unit `Trip.currency`)
+- Menyimpan template pembagian untuk dipakai ulang
+- Pembagian campuran (sebagian exact + sisanya rata) dalam satu expense
+
+### 7.3 Entity / Data Model (Prisma)
+
+Perubahan **additive & non-destruktif** pada model `Expense` dan `ExpenseShare` yang sudah ada (`prisma/schema/expense.prisma`). Tidak menambah tabel baru.
+
+```
+model Expense {
+  ...
+  splitType   SplitType @default(EQUAL)   # baru — tipe pembagian
+  ...
+}
+
+enum SplitType {
+  EQUAL
+  EXACT
+  PERCENTAGE
+  SHARE
+}
+
+model ExpenseShare {
+  id         String  @id @default(cuid())
+  expenseId  String
+  memberId   String?                       # jadi NULLABLE — diisi bila unit = member individual
+  groupId    String?                       # baru — diisi bila unit = grup (tanggungan bersama)
+  amount     Int                           # tanggungan terhitung (minor unit) — tetap
+  splitValue Int?                          # baru — input mentah per unit (lihat catatan), null untuk EQUAL
+
+  expense Expense      @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  member  TripMember?  @relation(fields: [memberId], references: [id])
+  group   MemberGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, memberId])
+  @@unique([expenseId, groupId])
+  @@index([memberId])
+  @@index([groupId])
+  @@map("expense_share")
+}
+```
+
+**Catatan:**
+- Tepat **satu** dari `memberId` / `groupId` terisi per baris share (di-validasi di service; Prisma tidak punya check constraint). `null` pada kolom unique di PostgreSQL dianggap distinct, sehingga `@@unique([expenseId, memberId])` & `@@unique([expenseId, groupId])` aman untuk baris campuran.
+- Arti `splitValue` mengikuti `splitType`:
+  - `EXACT` → nominal pasti unit (minor unit), `amount === splitValue`
+  - `PERCENTAGE` → **basis point** (persen × 100, mis. 25% = `2500`), total semua unit harus `10000`
+  - `SHARE` → bobot bilangan bulat positif (mis. `2`)
+  - `EQUAL` → `null`
+- **Backward compatible**: expense lama otomatis `splitType = EQUAL`, share lama tetap `memberId` terisi, `groupId`/`splitValue` `null`. Tidak perlu migrasi data.
+- Tambahkan relasi balik `shares ExpenseShare[]` pada `MemberGroup` (`onDelete: Cascade` agar share grup ikut bersih bila grup dihapus — perubahan komposisi grup tidak mengubah expense lama, hanya memengaruhi expense baru).
+- Migrasi additive baru: `add_split_type` (ubah `memberId` jadi nullable + tambah `groupId`, `splitValue`, `Expense.splitType`, enum `SplitType`).
+
+### 7.4 Halaman / Route
+
+**Tidak menambah halaman atau endpoint baru.** Fitur ini memperluas form & service expense yang sudah ada:
+
+| Route | Tipe | Akses | Perubahan |
+|---|---|---|---|
+| `/trips/[id]/expenses/new` | Protected | Member only | Form tambah: tambah pemilih `splitType` + input per unit |
+| `/trips/[id]/expenses/[expenseId]/edit` | Protected | Pembuat / OWNER | Form edit: prefill tipe & nilai dari `splitValue` |
+| `/trips/[id]/expenses/[expenseId]` | Protected | Member only | Detail: tampilkan ringkasan pembagian per unit (badge grup) |
+| `/api/trips/[id]/expenses` | API | Member only | `POST` create menerima `splitType` + `splits` |
+| `/api/trips/[id]/expenses/[expenseId]` | API | Member (mutasi: pembuat/OWNER) | `PATCH` menerima `splitType` + `splits` |
+
+### 7.5 User Flow
+
+#### A. Flow Pilih Tipe Pembagian (tambah / edit)
+1. Pada `ExpenseForm`, setelah memilih peserta, user memilih **Tipe Pembagian**: Rata / Nominal / Persentase / Bobot (default **Rata**)
+2. Sistem menurunkan **daftar unit** dari peserta: member non-grup → unit individual; member yang berbagi grup → digabung jadi **satu unit grup** (tampil sebagai badge grup)
+3. Sesuai tipe:
+   - **Rata**: tidak ada input tambahan; preview menampilkan nominal tiap unit (termasuk sisa)
+   - **Nominal**: tiap unit punya input nominal; UI menampilkan **sisa yang belum teralokasi** real-time
+   - **Persentase**: tiap unit punya input persen; UI menampilkan **total persen** (harus 100%)
+   - **Bobot**: tiap unit punya input bobot; UI menampilkan **nominal proporsional** terhitung
+4. Validasi client (Zod + cek agregat) → tombol simpan disable bila tidak valid (sum exact ≠ amount, persen ≠ 100, bobot ≤ 0)
+5. Submit → `POST`/`PATCH` dengan `{ splitType, splits: [{ unit, value? }] }`
+
+#### B. Flow Server Menghitung & Menyimpan
+1. Cek auth + `assertTripMember`; untuk edit, `assertExpenseEditable`; tolak bila trip `ARCHIVED` (409)
+2. Validasi: `paidById` & semua unit valid untuk trip ini; tiap unit grup adalah grup milik trip yang sama; tepat satu dari member/grup per unit
+3. Validasi agregat per tipe (sum exact = amount, sum persen = 10000 bp, bobot > 0)
+4. Hitung `amount` per unit via `calculateShares` (deterministik, sisa dibagikan agar `sum === amount`)
+5. Transaction: simpan/replace `Expense` (`splitType`) + hapus share lama + buat ulang `ExpenseShare` (memberId **atau** groupId, plus `splitValue`)
+6. Sukses → redirect/refresh + toast
+
+#### C. Flow Lihat Pembagian (detail expense)
+1. Detail expense menampilkan tiap unit: nama member / **badge grup** (beserta anggota), nominal tanggungan, dan label tipe (mis. "30%", "bobot 2", "nominal")
+2. Grup ditampilkan sebagai satu baris (satu pihak); anggota grup tidak ditampilkan saling berutang
+
+### 7.6 Technical Flow
+
+**Stack:** mengikuti [Add Expense](#5-add-expense-mvp) — Server Component untuk detail, Client Component `ExpenseForm`, pola `useState`/`useTransition` + `router.refresh()`, Zod client+server, Prisma transaction, reuse `requireSessionUser`/`assertTripMember`/`assertExpenseEditable` & format response `ok/created/fail/handleApiError`.
+
+**Helper inti — `calculateShares` (generalisasi `calculateEqualShares`):**
+```
+type SplitUnit = { key: string; type: "member" | "group"; refId: string; value?: number };
+
+calculateShares(amount: number, splitType: SplitType, units: SplitUnit[]): { unit: SplitUnit; amount: number }[]
+```
+- `EQUAL`: `base = floor(amount / n)`, `remainder = amount - base*n` dibagikan +1 ke `remainder` unit pertama (deterministik) → reuse logika `calculateEqualShares` existing
+- `EXACT`: `amount` unit = `value` (sudah divalidasi `sum === amount`)
+- `PERCENTAGE`: `raw = amount * bp / 10000`, bagikan sisa pembulatan (`amount - sum(floor)`) +1 ke unit dengan pecahan terbesar (largest remainder) → `sum === amount`
+- `SHARE`: `raw = amount * weight / totalWeight`, sisa pembulatan dibagikan dengan metode largest remainder yang sama
+- Invarian wajib untuk semua tipe: `sum(shares) === amount` dan tidak ada share negatif
+
+**Helper turunan unit — `resolveSplitUnits`:**
+```
+resolveSplitUnits(participants: TripMemberLite[]): SplitUnit[]
+```
+- Member tanpa `groupId` → 1 unit `member`
+- Member dengan `groupId` sama → digabung jadi 1 unit `group` (dedup per `groupId`)
+- Dipakai server saat menyiapkan unit; client memakai turunan yang sama agar preview konsisten
+
+**Struktur file (penambahan pada feature `expense` yang sudah ada):**
+```
+src/
+  features/
+    expense/
+      components/
+        SplitTypeSelector.tsx        # pilih EQUAL/EXACT/PERCENTAGE/SHARE
+        SplitInputList.tsx           # input per unit + indikator sisa/total/preview
+        SplitSummary.tsx             # ringkasan pembagian di detail expense
+        ExpenseForm.tsx              # (diperluas) integrasi split type + unit
+        ExpenseDetail.tsx            # (diperluas) render SplitSummary
+      schemas/
+        expenseSchema.ts             # (diperluas) splitType + splits + refine agregat
+      services/
+        calculateShares.ts           # generalisasi calculateEqualShares (semua tipe)
+        resolveSplitUnits.ts         # member → unit (collapse grup)
+        createExpense.ts             # (diperluas) terima splitType + splits
+        updateExpense.ts             # (diperluas) recalculate + replace shares
+        getExpenseById.ts            # (diperluas) sertakan group + splitValue per share
+  types/
+    expense.ts                       # (diperluas) SplitType, SplitInput, unit types
+```
+
+**Tambahan tipe (`src/types/expense.ts`):**
+```
+export type SplitType = "EQUAL" | "EXACT" | "PERCENTAGE" | "SHARE";
+
+export interface SplitInput {
+  type: "member" | "group";
+  refId: string;        // TripMember.id atau MemberGroup.id
+  value?: number;       // EXACT: minor unit, PERCENTAGE: basis point, SHARE: bobot; EQUAL: undefined
+}
+
+export interface ExpenseShareUnit {
+  type: "member" | "group";
+  refId: string;
+  displayName: string;  // nama member atau nama grup
+  amount: number;
+  splitValue: number | null;
+}
+```
+
+**Validation (Zod) — `expenseSchema` diperluas:**
+- Tambah `splitType` (enum) & `splits` (array `SplitInput`, min 1)
+- `superRefine` per tipe:
+  - `EXACT`: tiap `value` ≥ 0 integer; `sum(value) === amount`
+  - `PERCENTAGE`: tiap `value` 0–10000 integer; `sum(value) === 10000`
+  - `SHARE`: tiap `value` integer ≥ 1
+  - `EQUAL`: `value` diabaikan/optional
+- Validasi keanggotaan unit (member/grup milik trip) tetap di server (butuh akses DB)
+
+**Authorization rules:** identik [Add Expense](#5-add-expense-mvp) — member untuk akses, pembuat/OWNER untuk mutasi, tolak trip `ARCHIVED`.
+
+**Error handling:**
+- 422 bila agregat tidak valid: "Total nominal harus sama dengan jumlah pengeluaran" / "Total persentase harus 100%" / "Bobot harus lebih dari 0"
+- 422 bila unit (member/grup) bukan milik trip
+- 409 trip diarsipkan
+- 403 bukan pembuat/OWNER saat edit
+- Jangan expose raw error database
+
+### 7.7 Dependencies & Environment
+- **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
+- Formatting nominal & persen memakai `Intl.NumberFormat` (native) sesuai `Trip.currency`.
+
+### 7.8 Acceptance Criteria MVP
+
+- [ ] User dapat memilih tipe pembagian: Rata, Nominal, Persentase, Bobot
+- [ ] Grup diperlakukan sebagai **satu unit** dalam semua tipe pembagian
+- [ ] Member yang berbagi grup tidak muncul sebagai dua tanggungan terpisah
+- [ ] `EQUAL` membagi rata antar unit; sisa terbagi deterministik
+- [ ] `EXACT` menolak simpan bila total ≠ nominal expense
+- [ ] `PERCENTAGE` menolak simpan bila total ≠ 100%
+- [ ] `SHARE` membagi proporsional terhadap total bobot
+- [ ] `sum(shares) === amount` untuk **semua** tipe (tidak ada rupiah hilang/lebih)
+- [ ] `splitValue` tersimpan dan form edit ter-prefill sesuai tipe
+- [ ] Detail expense menampilkan ringkasan pembagian per unit + badge grup
+- [ ] Expense lama (sebelum fitur) tetap valid sebagai `EQUAL`
+- [ ] Validation jalan di client & server
+- [ ] Unit (member/grup) di luar trip ditolak
+- [ ] Tidak bisa ubah pembagian di trip diarsipkan (409)
+- [ ] Mobile-friendly (input per unit nyaman, indikator sisa/total jelas)
+- [ ] Dark mode support
+- [ ] Loading & error state konsisten
+
+### 7.9 Checklist Implementasi
+
+**Database:**
+- [x] Tambah `Expense.splitType` + enum `SplitType`
+- [x] Ubah `ExpenseShare.memberId` jadi nullable + tambah `groupId`, `splitValue`
+- [x] Tambah relasi balik `shares` di `MemberGroup` (`onDelete: Cascade`)
+- [~] Migration `add_split_type` ditulis — perlu dijalankan (`pnpm db:migrate` / `prisma migrate deploy`)
+
+**Types & Schema:**
+- [x] Perluas `src/types/expense.ts` (`SplitType`, `SplitInput`, `ExpenseShareUnit`, `ExpenseUnitOption`)
+- [x] Perluas `expenseSchema` (splitType + splits + `superRefine` agregat)
+
+**Service Layer:**
+- [x] `calculateShares` (semua tipe, largest-remainder, invarian `sum === amount`)
+- [x] `prepareExpenseShares` (validasi unit member/grup + build share rows) — menggantikan `resolveSplitUnits`; collapse grup dilakukan di `getExpenseFormContext`
+- [x] Perluas `createExpense` (terima splitType + splits, validasi unit)
+- [x] Perluas `updateExpense` (recalculate + replace shares)
+- [x] Perluas `getExpenseById` (sertakan group + splitValue)
+- [x] Perluas `getExpenseFormContext` (turunkan `units` = member non-grup + grup)
+
+**API Routes:**
+- [x] Perluas `POST /api/trips/[id]/expenses` (splitType + splits — via schema)
+- [x] Perluas `PATCH /api/trips/[id]/expenses/[expenseId]`
+
+**Components:**
+- [x] `SplitTypeSelector`
+- [x] `SplitInputList` (input per unit + indikator sisa/total/preview, termasuk ringkasan)
+- [x] Perluas `ExpenseForm` & halaman detail expense (badge grup + nilai split)
+
+**QA (manual):**
+- [ ] Test EQUAL berbasis unit (dengan & tanpa grup) — sisa benar
+- [ ] Test EXACT (valid + total tidak cocok ditolak)
+- [ ] Test PERCENTAGE (valid 100% + bukan 100% ditolak)
+- [ ] Test SHARE (proporsional + sisa pembulatan benar)
+- [ ] Test grup sebagai satu unit (anggota tidak terpecah)
+- [ ] Test edit prefill tiap tipe dari `splitValue`
+- [ ] Test expense lama tetap EQUAL
+- [ ] Test unit di luar trip ditolak (422)
+- [ ] Test ubah pembagian di trip archived (409)
+- [ ] Test dark mode & layout mobile (selector, input list, summary)
+
+### 7.10 Status
+
+**Current status:** Implementasi selesai — migration perlu dijalankan & QA manual menunggu
+**Target selesai:** TBD
+**Catatan:** Bergantung pada [Add Expense](#5-add-expense-mvp) (struktur `Expense`/`ExpenseShare`) & [Group Member](#6-group-member-mvp) (kontrak grup = 1 unit). Menjadi prasyarat akurasi untuk Balance Calculation & Settlement Calculation.
+
+---
+
 ## Fitur Berikutnya
 
-- [ ] Split Expense Logic
 - [ ] Balance Calculation
 - [ ] Settlement Calculation
 - [ ] Trip Summary

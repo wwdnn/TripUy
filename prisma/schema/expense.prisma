@@ -6,6 +6,7 @@ model Expense {
   currency    String
   date        DateTime
   category    ExpenseCategory @default(OTHER)
+  splitType   SplitType       @default(EQUAL)
   note        String?
   paidById    String
   createdById String
@@ -23,16 +24,21 @@ model Expense {
 }
 
 model ExpenseShare {
-  id        String @id @default(cuid())
-  expenseId String
-  memberId  String
-  amount    Int
+  id         String  @id @default(cuid())
+  expenseId  String
+  memberId   String?
+  groupId    String?
+  amount     Int
+  splitValue Int?
 
-  expense Expense    @relation(fields: [expenseId], references: [id], onDelete: Cascade)
-  member  TripMember @relation(fields: [memberId], references: [id])
+  expense Expense      @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  member  TripMember?  @relation(fields: [memberId], references: [id])
+  group   MemberGroup? @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([expenseId, memberId])
+  @@unique([expenseId, groupId])
   @@index([memberId])
+  @@index([groupId])
   @@map("expense_share")
 }
 
@@ -43,4 +49,11 @@ enum ExpenseCategory {
   ACTIVITY
   SHOPPING
   OTHER
+}
+
+enum SplitType {
+  EQUAL
+  EXACT
+  PERCENTAGE
+  SHARE
 }

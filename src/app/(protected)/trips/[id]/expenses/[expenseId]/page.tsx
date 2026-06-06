@@ -7,9 +7,28 @@ import { getExpenseById } from "@/features/expense/services/getExpenseById";
 import { TripNotFoundError } from "@/features/trip/services/errors";
 import { requireSessionUser } from "@/lib/auth/getSessionUser";
 import { formatDate, formatMoney } from "@/lib/utils";
+import type { SplitType } from "@/types/expense";
 
 interface ExpenseDetailPageProps {
   params: Promise<{ id: string; expenseId: string }>;
+}
+
+const SPLIT_TYPE_LABELS: Record<SplitType, string> = {
+  EQUAL: "Dibagi rata",
+  EXACT: "Nominal pasti",
+  PERCENTAGE: "Persentase",
+  SHARE: "Bobot",
+};
+
+function splitTypeLabel(splitType: SplitType): string {
+  return SPLIT_TYPE_LABELS[splitType];
+}
+
+function shareValueHint(splitType: SplitType, splitValue: number | null): string | null {
+  if (splitValue == null) return null;
+  if (splitType === "PERCENTAGE") return `${splitValue / 100}%`;
+  if (splitType === "SHARE") return `bobot ${splitValue}`;
+  return null;
 }
 
 export default async function ExpenseDetailPage({
@@ -43,11 +62,26 @@ export default async function ExpenseDetailPage({
       ) : null}
 
       <section className="border-border bg-card rounded-xl border p-6">
-        <h2 className="text-base font-semibold">Pembagian</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">Pembagian</h2>
+          <span className="text-muted-foreground text-xs">{splitTypeLabel(expense.splitType)}</span>
+        </div>
         <ul className="mt-3 flex flex-col gap-2">
           {expense.shares.map((share) => (
             <li key={share.id} className="flex items-center justify-between text-sm">
-              <span>{share.memberName}</span>
+              <span className="flex items-center gap-2">
+                {share.name}
+                {share.type === "group" ? (
+                  <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-xs">
+                    Grup
+                  </span>
+                ) : null}
+                {shareValueHint(expense.splitType, share.splitValue) ? (
+                  <span className="text-muted-foreground text-xs">
+                    {shareValueHint(expense.splitType, share.splitValue)}
+                  </span>
+                ) : null}
+              </span>
               <span className="font-medium">{formatMoney(share.amount, expense.currency)}</span>
             </li>
           ))}

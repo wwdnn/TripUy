@@ -6,11 +6,14 @@ export type ExpenseCategory =
   | "SHOPPING"
   | "OTHER";
 
-export interface ExpenseShare {
-  id: string;
-  expenseId: string;
-  memberId: string;
-  amount: number;
+export type SplitType = "EQUAL" | "EXACT" | "PERCENTAGE" | "SHARE";
+
+export type SplitUnitType = "member" | "group";
+
+export interface SplitInput {
+  type: SplitUnitType;
+  refId: string;
+  value?: number;
 }
 
 export interface Expense {
@@ -21,6 +24,7 @@ export interface Expense {
   currency: string;
   date: Date;
   category: ExpenseCategory;
+  splitType: SplitType;
   note: string | null;
   paidById: string;
   createdById: string;
@@ -28,13 +32,18 @@ export interface Expense {
   updatedAt: Date;
 }
 
-export interface ExpenseShareWithName extends ExpenseShare {
-  memberName: string;
+export interface ExpenseShareUnit {
+  id: string;
+  type: SplitUnitType;
+  refId: string;
+  name: string;
+  amount: number;
+  splitValue: number | null;
 }
 
 export interface ExpenseDetail extends Expense {
   paidByName: string;
-  shares: ExpenseShareWithName[];
+  shares: ExpenseShareUnit[];
   canEdit: boolean;
 }
 
@@ -48,10 +57,17 @@ export interface ExpenseMemberOption {
   name: string;
 }
 
+export interface ExpenseUnitOption {
+  type: SplitUnitType;
+  refId: string;
+  name: string;
+}
+
 export interface ExpenseFormContext {
   tripId: string;
   currency: string;
   members: ExpenseMemberOption[];
+  units: ExpenseUnitOption[];
   currentMemberId: string;
 }
 
@@ -62,7 +78,8 @@ export interface CreateExpenseInput {
   category: ExpenseCategory;
   note?: string;
   paidById: string;
-  participantIds: string[];
+  splitType: SplitType;
+  splits: SplitInput[];
 }
 
 export type UpdateExpenseInput = CreateExpenseInput;

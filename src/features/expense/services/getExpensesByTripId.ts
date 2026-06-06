@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { ExpenseCategory, ExpenseListItem } from "@/types/expense";
+import type { ExpenseCategory, ExpenseListItem, SplitType } from "@/types/expense";
 import { getCurrentMember, memberDisplayName } from "./expenseAccess";
 
 export async function getExpensesByTripId(
@@ -26,6 +26,7 @@ export async function getExpensesByTripId(
     currency: e.currency,
     date: e.date,
     category: e.category as ExpenseCategory,
+    splitType: e.splitType as SplitType,
     note: e.note,
     paidById: e.paidById,
     createdById: e.createdById,

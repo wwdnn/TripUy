@@ -1,6 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { ExpenseCategory, ExpenseDetail } from "@/types/expense";
+import type { ExpenseCategory, ExpenseDetail, ExpenseShareUnit, SplitType } from "@/types/expense";
 import { TripNotFoundError } from "@/features/trip/services/errors";
 import { getCurrentMember, memberDisplayName } from "./expenseAccess";
 
@@ -18,6 +18,7 @@ export async function getExpenseById(
       shares: {
         include: {
           member: { select: { guestName: true, user: { select: { name: true } } } },
+          group: { select: { name: true } },
         },
       },
     },
@@ -27,6 +28,27 @@ export async function getExpenseById(
 
   const canEdit = expense.createdById === currentMember.id || currentMember.role === "OWNER";
 
+  const shares: ExpenseShareUnit[] = expense.shares.map((share) => {
+    if (share.groupId) {
+      return {
+        id: share.id,
+        type: "group",
+        refId: share.groupId,
+        name: share.group?.name ?? "Grup",
+        amount: share.amount,
+        splitValue: share.splitValue,
+      };
+    }
+    return {
+      id: share.id,
+      type: "member",
+      refId: share.memberId ?? "",
+      name: share.member ? memberDisplayName(share.member) : "Tamu",
+      amount: share.amount,
+      splitValue: share.splitValue,
+    };
+  });
+
   return {
     id: expense.id,
     tripId: expense.tripId,
@@ -35,6 +57,7 @@ export async function getExpenseById(
     currency: expense.currency,
     date: expense.date,
     category: expense.category as ExpenseCategory,
+    splitType: expense.splitType as SplitType,
     note: expense.note,
     paidById: expense.paidById,
     createdById: expense.createdById,
@@ -42,12 +65,6 @@ export async function getExpenseById(
     updatedAt: expense.updatedAt,
     paidByName: memberDisplayName(expense.paidBy),
     canEdit,
-    shares: expense.shares.map((s) => ({
-      id: s.id,
-      expenseId: s.expenseId,
-      memberId: s.memberId,
-      amount: s.amount,
-      memberName: memberDisplayName(s.member),
-    })),
+    shares,
   };
 }

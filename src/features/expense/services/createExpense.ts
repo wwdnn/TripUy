@@ -2,8 +2,13 @@ import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { CreateExpenseInput } from "@/types/expense";
 import { TripForbiddenError, TripNotFoundError } from "@/features/trip/services/errors";
-import { calculateEqualShares } from "./calculateEqualShares";
 import { getCurrentMember } from "./expenseAccess";
+import { prepareExpenseShares } from "./prepareExpenseShares";
+
+
+
+
+
 
 export async function createExpense(
   tripId: string,
@@ -22,13 +27,11 @@ export async function createExpense(
   }
 
   const memberIds = new Set(trip.members.map((m) => m.id));
-  const isValidMembers =
-    memberIds.has(input.paidById) && input.participantIds.every((id) => memberIds.has(id));
-  if (!isValidMembers) {
-    throw new TripForbiddenError("Pembayar atau peserta tidak valid");
+  if (!memberIds.has(input.paidById)) {
+    throw new TripForbiddenError("Pembayar tidak valid");
   }
 
-  const shares = calculateEqualShares(input.amount, input.participantIds);
+  const shares = await prepareExpenseShares(tripId, input.splitType, input.splits, input.amount);
 
   const expense = await prisma.expense.create({
     data: {
@@ -38,6 +41,7 @@ export async function createExpense(
       currency: trip.currency,
       date: input.date,
       category: input.category,
+      splitType: input.splitType,
       note: input.note ?? null,
       paidById: input.paidById,
       createdById: currentMember.id,

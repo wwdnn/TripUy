@@ -9,10 +9,13 @@ import { EXPENSE_CATEGORIES } from "@/features/expense/categories";
 import { createExpenseSchema } from "@/features/expense/schemas/expenseSchema";
 import { useCreateExpense } from "@/features/expense/hooks/useCreateExpense";
 import { useUpdateExpense } from "@/features/expense/hooks/useUpdateExpense";
+import { buildSplits, unitKey } from "@/features/expense/splitForm";
+import { SplitTypeSelector } from "./SplitTypeSelector";
+import { SplitInputList } from "./SplitInputList";
 
-import type { ExpenseDetail, ExpenseFormContext } from "@/types/expense";
+import type { ExpenseDetail, ExpenseFormContext, SplitType } from "@/types/expense";
 
-type FieldKey = "title" | "amount" | "date" | "category" | "note" | "paidById" | "participantIds";
+type FieldKey = "title" | "amount" | "date" | "category" | "note" | "paidById" | "splits";
 type FieldErrors = Partial<Record<FieldKey, string>>;
 
 interface ExpenseFormProps {
@@ -28,15 +31,28 @@ function toDateInput(date: Date | string | null | undefined): string {
   return d.toISOString().slice(0, 10);
 }
 
+function initialSelectedKeys(context: ExpenseFormContext, initialData?: ExpenseDetail): string[] {
+  if (initialData) return initialData.shares.map((s) => unitKey(s.type, s.refId));
+  return context.units.map((u) => unitKey(u.type, u.refId));
+}
 
+function initialValues(initialData?: ExpenseDetail): Record<string, string> {
+  if (!initialData) return {};
+  const values: Record<string, string> = {};
+  for (const share of initialData.shares) {
+    if (share.splitValue == null) continue;
+    const raw = initialData.splitType === "PERCENTAGE" ? share.splitValue / 100 : share.splitValue;
+    values[unitKey(share.type, share.refId)] = String(raw);
+  }
+  return values;
+}
 
-
-
-
-
-
-
-export function ExpenseForm({ mode, context, expenseId, initialData }: ExpenseFormProps): JSX.Element {
+export function ExpenseForm({
+  mode,
+  context,
+  expenseId,
+  initialData,
+}: ExpenseFormProps): JSX.Element {
   const isCreate = mode === "create";
 
   const [title, setTitle] = useState(initialData?.title ?? "");
@@ -45,26 +61,28 @@ export function ExpenseForm({ mode, context, expenseId, initialData }: ExpenseFo
   const [category, setCategory] = useState(initialData?.category ?? "OTHER");
   const [note, setNote] = useState(initialData?.note ?? "");
   const [paidById, setPaidById] = useState(initialData?.paidById ?? context.currentMemberId);
-  const [participantIds, setParticipantIds] = useState<string[]>(
-    initialData ? initialData.shares.map((s) => s.memberId) : context.members.map((m) => m.id),
+  const [splitType, setSplitType] = useState<SplitType>(initialData?.splitType ?? "EQUAL");
+  const [selectedKeys, setSelectedKeys] = useState<string[]>(
+    initialSelectedKeys(context, initialData),
   );
+  const [splitValues, setSplitValues] = useState<Record<string, string>>(initialValues(initialData));
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const createMutation = useCreateExpense(context.tripId);
   const updateMutation = useUpdateExpense(context.tripId, expenseId ?? "");
   const { isPending, error } = isCreate ? createMutation : updateMutation;
 
-  function toggleParticipant(memberId: string): void {
-    setParticipantIds((prev) =>
-      prev.includes(memberId) ? prev.filter((id) => id !== memberId) : [...prev, memberId],
+  const amountNumber = Number.parseInt(amount, 10) || 0;
+
+  function toggleUnit(key: string): void {
+    setSelectedKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
     );
   }
 
-
-
-
-
-
+  function setUnitValue(key: string, value: string): void {
+    setSplitValues((prev) => ({ ...prev, [key]: value }));
+  }
 
   async function submit(): Promise<void> {
     setFieldErrors({});
@@ -75,7 +93,8 @@ export function ExpenseForm({ mode, context, expenseId, initialData }: ExpenseFo
       category,
       note: note || undefined,
       paidById,
-      participantIds,
+      splitType,
+      splits: buildSplits(selectedKeys, splitValues, splitType),
     });
 
     if (!parsed.success) {
@@ -184,29 +203,20 @@ export function ExpenseForm({ mode, context, expenseId, initialData }: ExpenseFo
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <Label>Ditanggung oleh</Label>
-        <div className="border-input flex flex-col gap-1 rounded-md border p-2">
-          {context.members.map((m) => (
-            <label
-              key={m.id}
-              className="hover:bg-muted flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2 text-sm"
-            >
-              <input
-                type="checkbox"
-                checked={participantIds.includes(m.id)}
-                onChange={() => toggleParticipant(m.id)}
-                disabled={isPending}
-                className="size-4"
-              />
-              {m.name}
-            </label>
-          ))}
-        </div>
-        {fieldErrors.participantIds ? (
-          <p className="text-destructive text-sm">{fieldErrors.participantIds}</p>
-        ) : null}
-      </div>
+      <SplitTypeSelector value={splitType} onChange={setSplitType} disabled={isPending} />
+
+      <SplitInputList
+        units={context.units}
+        currency={context.currency}
+        amount={amountNumber}
+        splitType={splitType}
+        selectedKeys={selectedKeys}
+        values={splitValues}
+        onToggle={toggleUnit}
+        onValueChange={setUnitValue}
+        disabled={isPending}
+        error={fieldErrors.splits}
+      />
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="note">Catatan (opsional)</Label>
