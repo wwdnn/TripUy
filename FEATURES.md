@@ -1858,9 +1858,227 @@ export interface ExpenseShareUnit {
 
 ---
 
+## 8. Balance Calculation (MVP)
+
+### 8.1 Tujuan
+Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: berapa total yang sudah dibayar seseorang/grup, berapa total yang menjadi tanggungannya, dan **selisih bersihnya** — apakah ia masih harus membayar (berutang) atau berhak menerima kembali (berpiutang). Fitur ini menjadi jembatan antara pencatatan expense dan perhitungan settlement.
+
+> Catatan ruang lingkup: fitur ini fokus pada **agregasi saldo bersih per pihak** (siapa kelebihan/kekurangan bayar), **bukan** menentukan siapa transfer ke siapa. Rekomendasi transaksi pelunasan (minimisasi jumlah transfer) didetailkan pada fitur terpisah Settlement Calculation. Fitur ini **mengkonsumsi kontrak** dari [Group Member](#6-group-member-mvp) (grup = 1 pihak) & [Split Expense Logic](#7-split-expense-logic-mvp) (`ExpenseShare` per unit) dan **tidak mengubah** data expense apa pun — perhitungan murni **read-only & on-the-fly**.
+
+### 8.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- Perhitungan saldo **on-the-fly** dari data `Expense` + `ExpenseShare` + komposisi grup terkini (tanpa menyimpan hasil / tanpa tabel baru)
+- Satuan perhitungan = **unit/pihak**: member individual (tanpa grup) + grup (sebagai satu pihak). Anggota se-grup **tidak saling berutang**
+- Per pihak dihitung: **total dibayar** (`paid`), **total ditanggung** (`owed`), dan **saldo bersih** (`balance = paid − owed`)
+- Konvensi tanda: `balance > 0` → **berpiutang** (kelebihan bayar, berhak menerima kembali); `balance < 0` → **berutang** (harus membayar); `balance = 0` → impas
+- Section "Saldo" di halaman detail trip (`/trips/[id]`) untuk semua member: daftar pihak + saldo masing-masing, plus total pengeluaran trip
+- Pembayar yang tergabung grup → pembayarannya **dikreditkan ke grup**; share lama yang masih `memberId` namun member-nya kini di grup → di-**collapse** ke grup (mengikuti komposisi terkini)
+- Format nominal sesuai `Trip.currency` (`Intl.NumberFormat`)
+- Invarian: `Σ paid === Σ owed === totalExpense`, sehingga `Σ balance === 0`
+- Empty / zero state (belum ada expense, atau semua impas)
+- Trip `ARCHIVED` tetap bisa dilihat saldonya (read-only)
+
+**Tidak termasuk MVP (future):**
+- Rekomendasi siapa-bayar-siapa & minimisasi transaksi → **Settlement Calculation**
+- Tandai lunas / catat pembayaran → **Settlement / Mark as Paid**
+- Rincian saldo per kategori / chart → **Trip Summary / Analytics**
+- Saldo lintas trip atau multi-currency dalam satu trip
+- Riwayat perubahan saldo / snapshot saldo per waktu
+- Pembagian internal saldo di dalam grup (grup tetap satu pihak)
+
+### 8.3 Entity / Data Model (Prisma)
+
+**Tidak menambah tabel, kolom, atau migration apa pun.** Saldo dihitung sepenuhnya dari data yang sudah ada:
+
+- `Expense.amount`, `Expense.paidById` (→ `TripMember`)
+- `ExpenseShare.amount`, `ExpenseShare.memberId` **atau** `ExpenseShare.groupId`
+- `TripMember.groupId` (komposisi grup terkini) & `MemberGroup`
+
+**Catatan:**
+- Karena murni dihitung ulang dari sumber data, perubahan grup (pindah/keluar grup) maupun edit expense **langsung tercermin** pada saldo tanpa migrasi data.
+- Resolusi pihak untuk **pembayar**: `paidBy` member → jika `member.groupId` ada, dikreditkan ke unit grup; jika tidak, ke unit member individual.
+- Resolusi pihak untuk **tanggungan**: `share.groupId` → unit grup; selain itu `share.memberId` → resolve ke unit grup bila member-nya kini bergrup, atau unit member individual.
+
+### 8.4 Halaman / Route
+
+| Route | Tipe | Akses | Deskripsi |
+|---|---|---|---|
+| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section "Saldo" (daftar pihak + saldo bersih + total pengeluaran) |
+
+> Mengikuti pola yang sudah dipakai fitur sebelumnya (Server Component memanggil service langsung, project belum memakai React Query), **tidak dibuat endpoint API baru**. Section saldo dirender di Server Component detail trip via service `getTripBalances(tripId)`. Endpoint `GET /api/trips/[id]/balances` **opsional di masa depan** bila Settlement membutuhkan fetch client-side.
+
+### 8.5 User Flow
+
+#### A. Flow Lihat Saldo (semua member)
+1. Member membuka `/trips/[id]`
+2. Server Component memanggil `getTripBalances(tripId)` (setelah `assertTripMember`)
+3. Section "Saldo" menampilkan, untuk tiap pihak: nama member / **badge grup**, total dibayar, total ditanggung, dan **saldo bersih** dengan indikator visual:
+   - Berpiutang (hijau / "menerima Rp…")
+   - Berutang (merah / "membayar Rp…")
+   - Impas (netral)
+4. Tampilkan juga **total pengeluaran trip** sebagai konteks
+5. Urutan tampil: berpiutang terbesar di atas → berutang → impas (deterministik, tie-break by nama)
+
+#### B. Flow Empty / Zero State
+1. Belum ada expense → tampilkan empty state "Belum ada pengeluaran, saldo masih kosong" + CTA "Tambah Pengeluaran"
+2. Ada expense tapi semua impas (mis. semua bayar = tanggungan) → tampilkan info "Semua sudah impas"
+
+#### C. Flow Trip Diarsipkan
+1. Trip `ARCHIVED` → saldo tetap dihitung & ditampilkan (read-only), tanpa CTA tambah expense
+
+### 8.6 Technical Flow
+
+**Stack:**
+- Server Component untuk render section saldo (initial fetch via service langsung)
+- Tanpa Client Component / hook mutation (read-only); interaktivitas minimal cukup Server Component
+- Reuse `requireSessionUser`, `assertTripMember`, error class `TripForbiddenError`/`TripNotFoundError`
+- **Tidak** ada Prisma write — hanya query baca
+
+**Helper inti — `calculateBalances` (pure, deterministik, mudah dites):**
+```
+type BalanceMemberLite = { id: string; displayName: string; isGuest: boolean; groupId: string | null };
+type BalanceGroupLite  = { id: string; name: string; color: string | null };
+type BalanceExpenseLite = {
+  amount: number;
+  paidById: string;                                   // TripMember.id
+  shares: { amount: number; memberId: string | null; groupId: string | null }[];
+};
+
+calculateBalances(
+  members: BalanceMemberLite[],
+  groups: BalanceGroupLite[],
+  expenses: BalanceExpenseLite[],
+): BalanceUnit[]
+```
+Algoritma:
+1. **Bangun unit/pihak** dari komposisi terkini: tiap member tanpa `groupId` → unit `member`; tiap grup (yang punya ≥1 anggota) → unit `group` (kumpulkan `memberIds` anggotanya). Simpan peta `memberId → unitKey`.
+2. Inisialisasi tiap unit `{ paid: 0, owed: 0 }`.
+3. Untuk tiap expense:
+   - `paidById` → resolve unit pembayar → `unit.paid += expense.amount`
+   - Untuk tiap `share`: jika `groupId` → unit grup; jika `memberId` → unit via peta member (collapse ke grup bila kini bergrup) → `unit.owed += share.amount`
+4. `balance = paid − owed` untuk tiap unit.
+5. Urutkan deterministik (piutang desc → utang → nama asc).
+
+**Invarian wajib (diuji):** `Σ paid === Σ owed`; `Σ balance === 0`; tidak ada pihak hilang dari hasil. Karena `Σ shares === amount` per expense (dijamin Split Expense Logic), invarian ini selalu terpenuhi.
+
+**Service — `getTripBalances(tripId)`:**
+- `assertTripMember` (pengakses harus member)
+- Query: members (+ user displayName / guestName, `groupId`), groups, expenses (+ shares) milik trip
+- Panggil `calculateBalances(...)` → kembalikan `TripBalanceSummary`
+
+**Struktur file (diusulkan — perlu konfirmasi pembuatan folder `features/balance`):**
+```
+src/
+  app/
+    (protected)/
+      trips/
+        [id]/
+          page.tsx                       # sisipkan <BalanceSection />
+  features/
+    balance/
+      components/
+        BalanceSection.tsx               # wrapper section saldo di detail trip
+        BalanceList.tsx                  # daftar pihak
+        BalanceUnitRow.tsx               # satu baris: nama/badge grup + paid/owed + saldo
+        BalanceEmptyState.tsx            # belum ada expense
+      services/
+        calculateBalances.ts             # helper pure (semua agregasi)
+        getTripBalances.ts               # fetch data + assert member + calculate
+  types/
+    balance.ts                           # BalanceUnit, TripBalanceSummary
+```
+
+**Tambahan tipe (`src/types/balance.ts`):**
+```
+export interface BalanceUnit {
+  type: "member" | "group";
+  refId: string;            // TripMember.id atau MemberGroup.id
+  displayName: string;      // nama member atau nama grup
+  isGuest: boolean;         // true bila member individual berstatus guest
+  memberIds: string[];      // TripMember.id yang diwakili unit (>1 untuk grup)
+  paid: number;             // total dibayar (minor unit)
+  owed: number;             // total ditanggung (minor unit)
+  balance: number;          // paid - owed (positif = piutang, negatif = utang)
+}
+
+export interface TripBalanceSummary {
+  currency: string;
+  totalExpense: number;     // Σ amount semua expense (minor unit)
+  units: BalanceUnit[];
+}
+```
+
+**Authorization rules:**
+- Akses saldo = **member trip** (`assertTripMember`). Tidak ada aksi mutasi → tidak ada cek OWNER.
+- Saldo tidak membocorkan data sensitif tambahan (hanya agregat dari data yang sudah boleh dilihat member).
+
+**Error handling:**
+- 401 belum login
+- 404 trip tidak ditemukan atau pengakses bukan member
+- Jangan expose raw error database
+- Bila ada anomali data (mis. share menunjuk member yang tak lagi ada di trip) → diperlakukan defensif (di-skip / dimasukkan unit "tidak diketahui") tanpa crash — dicatat sebagai edge case future
+
+### 8.7 Dependencies & Environment
+- **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
+- Formatting nominal memakai helper currency existing (`Intl.NumberFormat` sesuai `Trip.currency`).
+
+### 8.8 Acceptance Criteria MVP
+
+- [ ] Saldo dihitung on-the-fly dari expense + share + komposisi grup terkini (tanpa tabel/penyimpanan baru)
+- [ ] Tiap pihak menampilkan total dibayar, total ditanggung, dan saldo bersih
+- [ ] Grup diperlakukan sebagai **satu pihak**; anggota se-grup tidak saling berutang
+- [ ] Pembayaran oleh anggota grup dikreditkan ke grup
+- [ ] Share lama berbasis `memberId` yang kini bergrup di-collapse ke grup
+- [ ] `Σ balance === 0` (tidak ada nominal hilang/lebih) untuk semua kombinasi split
+- [ ] Konvensi tanda benar (positif = piutang, negatif = utang)
+- [ ] Section saldo tampil di detail trip untuk semua member
+- [ ] Total pengeluaran trip tampil sebagai konteks
+- [ ] Empty state saat belum ada expense; info impas saat semua saldo 0
+- [ ] Saldo tetap tampil (read-only) di trip diarsipkan
+- [ ] Nominal terformat sesuai currency trip
+- [ ] Non-member tidak bisa melihat saldo (404)
+- [ ] Mobile-friendly (baris saldo terbaca, indikator warna jelas)
+- [ ] Dark mode support (warna piutang/utang tetap kontras)
+- [ ] Loading & error state konsisten
+
+### 8.9 Checklist Implementasi
+
+**Database:**
+- [x] Tidak ada perubahan schema / migration (read-only)
+
+**Types:**
+- [x] Buat `src/types/balance.ts` (`BalanceUnit`, `TripBalanceSummary`)
+
+**Service Layer:**
+- [x] `calculateBalances` (helper pure: bangun unit, agregasi paid/owed, invarian `Σ balance === 0`)
+- [x] `getTripBalances` (assert member + query expense/share/grup + calculate)
+
+**UI:**
+- [x] Sisipkan `BalanceSection` di `/trips/[id]`
+- [x] `BalanceSection` (satu komponen: total + daftar pihak + paid/owed + saldo) — disederhanakan, tidak dipecah jadi `BalanceList`/`BalanceUnitRow`/`BalanceEmptyState` terpisah
+- [~] ~~`BalanceList`, `BalanceUnitRow`, `BalanceEmptyState`~~ — digabung ke `BalanceSection` (anti over-engineering)
+
+**QA (manual):**
+- [ ] Test saldo dasar (1 pembayar, beberapa peserta) — tanda & nominal benar
+- [ ] Test dengan grup (pembayar grup, tanggungan grup) — grup satu pihak
+- [ ] Test share lama `memberId` yang kini bergrup → collapse benar
+- [ ] Test semua tipe split (EQUAL/EXACT/PERCENTAGE/SHARE) → `Σ balance === 0`
+- [ ] Test empty state & semua impas
+- [ ] Test trip archived (saldo read-only tampil)
+- [ ] Test non-member (404)
+- [ ] Test dark mode & layout mobile
+
+### 8.10 Status
+
+**Current status:** Implementasi selesai — QA manual menunggu (build/lint hijau)
+**Target selesai:** TBD
+**Catatan:** Bergantung pada [Add Expense](#5-add-expense-mvp), [Group Member](#6-group-member-mvp), dan [Split Expense Logic](#7-split-expense-logic-mvp) (butuh `Expense`/`ExpenseShare` per unit + kontrak grup = 1 pihak). Menjadi prasyarat langsung untuk **Settlement Calculation** (saldo bersih per pihak adalah input utama algoritma pelunasan).
+
+---
+
 ## Fitur Berikutnya
 
-- [ ] Balance Calculation
 - [ ] Settlement Calculation
 - [ ] Trip Summary
 - [ ] User Profile

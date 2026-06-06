@@ -10,6 +10,8 @@ import { ExpenseSection } from "@/features/expense/components/ExpenseSection";
 import { getExpensesByTripId } from "@/features/expense/services/getExpensesByTripId";
 import { GroupSection } from "@/features/group/components/GroupSection";
 import { getTripGroups } from "@/features/group/services/getTripGroups";
+import { BalanceSection } from "@/features/balance/components/BalanceSection";
+import { getTripBalances } from "@/features/balance/services/getTripBalances";
 import { requireSessionUser } from "@/lib/auth/getSessionUser";
 
 interface TripDetailPageProps {
@@ -35,6 +37,7 @@ export default async function TripDetailPage({ params }: TripDetailPageProps): P
 
   const expenses = await getExpensesByTripId(id, user.id);
   const groupData = await getTripGroups(id, user.id);
+  const balances = await getTripBalances(id, user.id);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8">
@@ -51,6 +54,8 @@ export default async function TripDetailPage({ params }: TripDetailPageProps): P
       <GroupSection tripId={trip.id} data={groupData} />
 
       <ExpenseSection tripId={trip.id} expenses={expenses} />
+
+      <BalanceSection summary={balances} />
     </main>
   );
 }
