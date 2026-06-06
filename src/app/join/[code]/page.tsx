@@ -19,6 +19,12 @@ function formatDateRange(start: Date, end: Date | null): string {
   return `${startStr} – ${new Date(end).toLocaleDateString("id-ID", opts)}`;
 }
 
+
+
+
+
+
+
 function InvalidInvite(): JSX.Element {
   return (
     <main className="mx-auto flex w-full max-w-md flex-col items-center gap-4 px-4 py-16 text-center">

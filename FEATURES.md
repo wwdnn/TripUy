@@ -904,9 +904,382 @@ Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik seba
 
 ---
 
+## 5. Add Expense (MVP)
+
+### 5.1 Tujuan
+Memungkinkan member trip (user terdaftar maupun guest) untuk **mencatat pengeluaran** di dalam sebuah trip: siapa yang membayar, berapa nominalnya, untuk apa, dan kapan. Fitur ini menjadi sumber data utama bagi perhitungan pembagian biaya, balance, dan settlement di iterasi berikutnya.
+
+> Catatan ruang lingkup: fitur ini fokus pada **pencatatan pengeluaran (CRUD expense)** dan **pemilihan peserta yang menanggung** dengan pembagian **rata (equal split)** sebagai default. Logika pembagian lanjutan (persentase, nominal custom, share tidak rata) didetailkan pada fitur terpisah [Split Expense Logic](#fitur-berikutnya). Perhitungan balance & settlement juga fitur terpisah — di sini hanya menyimpan data mentah pengeluaran beserta share-nya.
+
+### 5.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- Member trip dapat menambah expense baru di dalam trip yang aktif
+- Form input: judul/deskripsi, nominal, tanggal, pembayar (`paidBy`), peserta yang menanggung (`participants`), kategori (opsional), catatan (opsional)
+- Pembayar dipilih dari daftar **member trip** (mendukung user & guest)
+- Peserta default = semua member; user dapat memilih sebagian (minimal 1)
+- Pembagian biaya **rata (equal split)** otomatis dihitung saat simpan dan disimpan sebagai `ExpenseShare`
+- Halaman / section daftar expense per trip (terbaru di atas)
+- Detail expense (siapa bayar, peserta, share masing-masing)
+- Edit expense — pembuat expense atau OWNER trip
+- Delete expense — pembuat expense atau OWNER trip, dengan konfirmasi
+- Empty state saat trip belum punya expense
+- Nominal disimpan sebagai **integer minor unit** (hindari float) dengan currency mengikuti `Trip.currency`
+
+**Tidak termasuk MVP (future):**
+- Split tidak rata / custom (persentase, nominal per orang, weight) → [Split Expense Logic](#fitur-berikutnya)
+- Perhitungan balance & settlement → fitur terpisah
+- Upload struk / receipt (Receipt upload)
+- Multi-currency per expense (ikut currency trip)
+- Expense berulang (recurring)
+- Kategori custom buatan user (MVP pakai daftar kategori tetap / opsional)
+- Edit/hapus expense oleh sembarang member (MVP hanya pembuat + OWNER)
+- Komentar / aktivitas pada expense
+
+### 5.3 Entity / Data Model (Prisma)
+
+Menambah model baru pada `prisma/schema/` (mengikuti pola multi-file schema, mis. `prisma/schema/expense.prisma`). Tidak mengubah model yang sudah ada.
+
+```
+model Expense {
+  id          String   @id @default(cuid())
+  tripId      String
+  title       String
+  amount      Int                       # minor unit (mis. rupiah penuh untuk IDR), hindari float
+  currency    String                    # snapshot dari Trip.currency saat dibuat
+  date        DateTime                  # tanggal pengeluaran (bukan createdAt)
+  category    ExpenseCategory @default(OTHER)
+  note        String?
+  paidById    String                    # TripMember.id pembayar (mendukung guest)
+  createdById String                    # TripMember.id pencatat
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  trip      Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  paidBy    TripMember     @relation("ExpensePaidBy", fields: [paidById], references: [id])
+  createdBy TripMember     @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  shares    ExpenseShare[]
+
+  @@index([tripId])
+  @@index([paidById])
+  @@map("expense")
+}
+
+model ExpenseShare {
+  id           String @id @default(cuid())
+  expenseId    String
+  memberId     String                   # TripMember.id peserta yang menanggung
+  amount       Int                      # bagian yang ditanggung (minor unit)
+
+  expense Expense    @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  member  TripMember @relation(fields: [memberId], references: [id])
+
+  @@unique([expenseId, memberId])
+  @@index([memberId])
+  @@map("expense_share")
+}
+
+enum ExpenseCategory {
+  FOOD
+  TRANSPORT
+  LODGING
+  ACTIVITY
+  SHOPPING
+  OTHER
+}
+```
+
+**Catatan:**
+- `paidBy`, `createdBy`, dan `share.member` mengacu ke `TripMember` (bukan `User`) agar **guest** bisa membayar / menanggung expense.
+- Relasi balik perlu ditambahkan di `TripMember` (`expensesPaid`, `expensesCreated`, `shares`) dan di `Trip` (`expenses`).
+- `amount` disimpan sebagai `Int` minor unit untuk menghindari masalah pembulatan float; pembagian rata menangani sisa pembagian (lihat 5.6).
+- `onDelete: Cascade` pada `Expense` & `ExpenseShare` agar bersih saat trip / expense dihapus.
+- Migrasi additive baru: `add_expense` (non-destruktif).
+
+### 5.4 Halaman / Route
+
+| Route | Tipe | Akses | Deskripsi |
+|---|---|---|---|
+| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section daftar expense + tombol "Tambah Pengeluaran" |
+| `/trips/[id]/expenses/new` | Protected | Member only | Form tambah expense |
+| `/trips/[id]/expenses/[expenseId]` | Protected | Member only | Detail expense |
+| `/trips/[id]/expenses/[expenseId]/edit` | Protected | Pembuat / OWNER | Form edit expense |
+| `/api/trips/[id]/expenses` | API | Member only | `GET` list, `POST` create |
+| `/api/trips/[id]/expenses/[expenseId]` | API | Member only (mutasi: pembuat/OWNER) | `GET`, `PATCH`, `DELETE` |
+
+### 5.5 User Flow
+
+#### A. Flow Tambah Expense
+1. Member membuka `/trips/[id]`, pada section "Pengeluaran" klik "Tambah Pengeluaran"
+2. Redirect ke `/trips/[id]/expenses/new`
+3. Form menampilkan: judul, nominal, tanggal (default hari ini), pembayar (dropdown member trip, default member saat ini), peserta (multi-select member, default semua tercentang), kategori (default OTHER), catatan (opsional)
+4. Client-side: validasi Zod (judul min 1, nominal > 0, minimal 1 peserta, tanggal valid)
+5. Submit → `POST /api/trips/[id]/expenses`
+6. Server:
+   - Cek auth + `assertTripMember` (pengakses harus member)
+   - Validasi `paidById` & semua `participantIds` adalah member dari trip ini
+   - Tolak jika trip `ARCHIVED` (409 — tidak boleh menambah expense di trip arsip)
+   - Hitung equal split → buat `Expense` + banyak `ExpenseShare` dalam satu transaction
+7. Sukses → redirect ke detail trip / detail expense + toast "Pengeluaran ditambahkan"
+
+#### B. Flow List Expense (di detail trip)
+1. Server Component detail trip memanggil service `getExpensesByTripId(tripId)`
+2. Tampilkan card list (mobile-first): judul, nominal terformat, nama pembayar, tanggal, kategori badge, jumlah peserta
+3. Order berdasar `date DESC` lalu `createdAt DESC`
+4. Empty state jika belum ada expense → CTA "Tambah Pengeluaran"
+
+#### C. Flow Detail Expense
+1. User klik card expense → `/trips/[id]/expenses/[expenseId]`
+2. Server Component fetch `getExpenseById(expenseId, tripId)` + assert member
+3. Tampilkan: judul, nominal, tanggal, kategori, catatan, pembayar, daftar peserta beserta share masing-masing
+4. Tombol Edit & Hapus muncul kondisional (pembuat expense atau OWNER trip)
+
+#### D. Flow Edit Expense
+1. Pembuat / OWNER klik "Edit" → `/trips/[id]/expenses/[expenseId]/edit`
+2. Form prefilled → submit `PATCH /api/trips/[id]/expenses/[expenseId]`
+3. Server: assert member + cek pembuat/OWNER → recalculate share → update dalam transaction (hapus share lama, buat ulang)
+4. Redirect balik + toast sukses
+
+#### E. Flow Delete Expense
+1. Pembuat / OWNER klik "Hapus" → konfirmasi (bottom sheet di mobile)
+2. Confirm → `DELETE /api/trips/[id]/expenses/[expenseId]`
+3. Server: assert member + cek pembuat/OWNER → hapus expense (cascade hapus share)
+4. Refresh data + toast "Pengeluaran dihapus"
+
+### 5.6 Technical Flow
+
+**Stack:**
+- Server Component untuk list & detail (initial fetch via service langsung)
+- Client Component untuk form (interaction)
+- Hook pola **`useState`/`useTransition` + `router.refresh()`** (mengikuti pola existing, project belum memakai React Query)
+- Zod untuk validation di client & server
+- Prisma **transaction** saat create/edit (Expense + ExpenseShare atomik)
+- Reuse `requireSessionUser`, `assertTripMember`, format response `ok/created/fail/handleApiError`, dan error class `TripForbiddenError`/`TripNotFoundError`
+
+**Equal split (helper `calculateEqualShares`):**
+- Bagi `amount` rata ke `n` peserta: `base = Math.floor(amount / n)`
+- Sisa `remainder = amount - base * n` dibagikan +1 ke `remainder` peserta pertama (deterministik), sehingga `sum(shares) === amount` (tidak ada rupiah hilang/lebih)
+
+**Struktur file:**
+```
+src/
+  app/
+    (protected)/
+      trips/
+        [id]/
+          page.tsx                       # sisipkan <ExpenseSection />
+          expenses/
+            new/page.tsx                 # form tambah
+            [expenseId]/
+              page.tsx                   # detail expense
+              edit/page.tsx              # form edit
+    api/
+      trips/
+        [id]/
+          expenses/
+            route.ts                     # GET list, POST create
+            [expenseId]/route.ts         # GET, PATCH, DELETE
+  features/
+    expense/
+      components/
+        ExpenseSection.tsx               # wrapper list + CTA di detail trip
+        ExpenseList.tsx
+        ExpenseCard.tsx
+        ExpenseForm.tsx                  # reusable create + edit
+        ExpenseDetail.tsx
+        ExpenseEmptyState.tsx
+        ExpenseCategoryBadge.tsx
+        MemberSelect.tsx                 # pilih pembayar / peserta dari member trip
+        DeleteExpenseDialog.tsx
+      hooks/
+        useCreateExpense.ts
+        useUpdateExpense.ts
+        useDeleteExpense.ts
+      schemas/
+        expenseSchema.ts                 # createExpenseSchema, updateExpenseSchema
+      services/
+        createExpense.ts
+        getExpensesByTripId.ts
+        getExpenseById.ts
+        updateExpense.ts
+        deleteExpense.ts
+        calculateEqualShares.ts          # helper pembagian rata
+        assertExpenseEditable.ts         # cek pembuat / OWNER
+  lib/
+    api/
+      expense/
+        createExpense.ts                 # client fetch wrapper
+        getExpenses.ts
+        updateExpense.ts
+        deleteExpense.ts
+  types/
+    expense.ts                           # Expense, ExpenseShare, ExpenseCategory, input types
+```
+
+**Tambahan tipe (`src/types/expense.ts`):**
+```
+export type ExpenseCategory =
+  | "FOOD" | "TRANSPORT" | "LODGING" | "ACTIVITY" | "SHOPPING" | "OTHER";
+
+export interface ExpenseShare {
+  id: string;
+  expenseId: string;
+  memberId: string;
+  amount: number;
+}
+
+export interface Expense {
+  id: string;
+  tripId: string;
+  title: string;
+  amount: number;
+  currency: string;
+  date: Date;
+  category: ExpenseCategory;
+  note: string | null;
+  paidById: string;
+  createdById: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ExpenseWithShares extends Expense {
+  shares: ExpenseShare[];
+}
+
+export interface ExpenseListItem extends Expense {
+  paidByName: string;
+  participantCount: number;
+}
+
+export interface CreateExpenseInput {
+  title: string;
+  amount: number;
+  date: Date;
+  category?: ExpenseCategory;
+  note?: string;
+  paidById: string;
+  participantIds: string[];
+}
+
+export type UpdateExpenseInput = Partial<CreateExpenseInput>;
+```
+
+**Validation (Zod):**
+- `createExpenseSchema`: title (min 1, max 100), amount (int positif, > 0), date (coerce date), category (enum, default OTHER), note (max 500, optional), paidById (string non-empty), participantIds (array string, min 1)
+- `updateExpenseSchema`: partial dari create
+
+**Authorization rules:**
+- Semua endpoint cek session + `assertTripMember` (akses minimal = member trip)
+- `paidById` & semua `participantIds` divalidasi sebagai member trip yang sama (tolak jika ada yang bukan member)
+- `PATCH` / `DELETE`: `assertExpenseEditable` → boleh jika `createdById` = member saat ini **atau** role member saat ini = OWNER
+- Tolak create/edit jika trip `ARCHIVED`
+
+**Error handling:**
+- 401 belum login
+- 403 bukan pembuat / bukan OWNER saat edit/hapus → "Anda tidak dapat mengubah pengeluaran ini"
+- 404 expense / trip tidak ditemukan atau bukan member
+- 409 trip diarsipkan → "Trip ini sudah diarsipkan, tidak dapat menambah pengeluaran"
+- 422 validation gagal (nominal ≤ 0, tidak ada peserta, dll)
+- Jangan expose raw error database
+
+### 5.7 Dependencies & Environment
+- **Tidak ada dependency baru** dan **tidak ada environment variable baru** untuk MVP ini.
+- Formatting nominal memakai `Intl.NumberFormat` (native) sesuai `currency` trip — disimpan sebagai helper di `src/lib/utils.ts` jika belum ada.
+
+### 5.8 Acceptance Criteria MVP
+
+- [ ] Member dapat menambah expense pada trip aktif
+- [ ] Pembayar dapat dipilih dari member trip (termasuk guest)
+- [ ] Peserta default semua member, dapat dikurangi (minimal 1)
+- [ ] Pembagian rata otomatis dihitung dan `sum(shares) === amount` (tanpa rupiah hilang)
+- [ ] Nominal disimpan sebagai integer minor unit (bukan float)
+- [ ] Daftar expense tampil di detail trip (terbaru di atas)
+- [ ] Detail expense menampilkan pembayar & share tiap peserta
+- [ ] Pembuat / OWNER dapat edit expense (share dihitung ulang)
+- [ ] Pembuat / OWNER dapat hapus expense dengan konfirmasi
+- [ ] Member lain (bukan pembuat/OWNER) tidak melihat tombol edit/hapus (403 jika dipaksa via API)
+- [ ] Tidak bisa menambah/ubah expense di trip yang diarsipkan (409)
+- [ ] `paidById`/`participantIds` di luar member trip ditolak
+- [ ] Validation jalan di client & server
+- [ ] Empty state tampil saat belum ada expense
+- [ ] Nominal terformat sesuai currency trip
+- [ ] Mobile-friendly (tap area ≥ 44px, sticky CTA di form, card list)
+- [ ] Dark mode support
+- [ ] Loading & error state konsisten
+
+### 5.9 Checklist Implementasi
+
+**Database:**
+- [ ] Tambah model `Expense`, `ExpenseShare`, enum `ExpenseCategory` (mis. `prisma/schema/expense.prisma`)
+- [ ] Tambah relasi balik di `Trip` (`expenses`) & `TripMember` (`expensesPaid`, `expensesCreated`, `shares`)
+- [ ] Run migration `add_expense` (additive)
+
+**Types & Schema:**
+- [ ] Buat `src/types/expense.ts`
+- [ ] Buat `createExpenseSchema`, `updateExpenseSchema` (Zod)
+
+**Service Layer:**
+- [ ] `calculateEqualShares` (helper, remainder deterministik)
+- [ ] `createExpense` (transaction Expense + ExpenseShare, validasi member)
+- [ ] `getExpensesByTripId` (list item + nama pembayar + jumlah peserta)
+- [ ] `getExpenseById` (dengan shares + assert member)
+- [ ] `updateExpense` (recalculate share dalam transaction)
+- [ ] `deleteExpense` (assert editable)
+- [ ] `assertExpenseEditable` (pembuat / OWNER)
+
+**API Routes:**
+- [ ] `GET /api/trips/[id]/expenses`
+- [ ] `POST /api/trips/[id]/expenses`
+- [ ] `GET /api/trips/[id]/expenses/[expenseId]`
+- [ ] `PATCH /api/trips/[id]/expenses/[expenseId]`
+- [ ] `DELETE /api/trips/[id]/expenses/[expenseId]`
+
+**Client Fetch (`src/lib/api/expense`):**
+- [ ] `createExpense.ts`
+- [ ] `getExpenses.ts`
+- [ ] `updateExpense.ts`
+- [ ] `deleteExpense.ts`
+
+**UI Pages:**
+- [ ] `/trips/[id]/expenses/new`
+- [ ] `/trips/[id]/expenses/[expenseId]`
+- [ ] `/trips/[id]/expenses/[expenseId]/edit`
+- [ ] Sisipkan `ExpenseSection` di `/trips/[id]`
+
+**Components:**
+- [ ] `ExpenseSection`, `ExpenseList`, `ExpenseCard`
+- [ ] `ExpenseForm` (reusable create + edit)
+- [ ] `ExpenseDetail`
+- [ ] `ExpenseEmptyState`, `ExpenseCategoryBadge`
+- [ ] `MemberSelect` (pembayar + peserta)
+- [ ] `DeleteExpenseDialog`
+
+**Hooks:**
+- [ ] `useCreateExpense`, `useUpdateExpense`, `useDeleteExpense` (pola `router.refresh()`)
+
+**QA (manual):**
+- [ ] Test tambah expense sukses + equal split benar (cek sisa pembagian)
+- [ ] Test tambah dengan validation error (nominal 0, peserta kosong)
+- [ ] Test pembayar/peserta guest
+- [ ] Test list & detail expense
+- [ ] Test edit (share dihitung ulang)
+- [ ] Test hapus dengan konfirmasi
+- [ ] Test edit/hapus oleh non-pembuat & non-OWNER (403)
+- [ ] Test tambah expense di trip archived (409)
+- [ ] Test dark mode & layout mobile (form, list, detail)
+
+### 5.10 Status
+
+**Current status:** Belum dimulai
+**Target selesai:** TBD
+**Catatan:** Bergantung pada [Create Trip](#2-create-trip--room-mvp) & [Join Trip](#4-join-trip-user--guest-mvp) (butuh trip + daftar member, termasuk guest). Menjadi prasyarat untuk Split Expense Logic, Balance Calculation, dan Settlement.
+
+---
+
 ## Fitur Berikutnya
 
-- [ ] Add Expense
+- [ ] Group Member
 - [ ] Split Expense Logic
 - [ ] Balance Calculation
 - [ ] Settlement Calculation
