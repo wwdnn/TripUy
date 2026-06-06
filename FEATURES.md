@@ -1277,9 +1277,317 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 
 ---
 
+## 6. Group Member (MVP)
+
+### 6.1 Tujuan
+Memungkinkan OWNER mengelompokkan beberapa member trip (mis. pasangan, keluarga, atau orang yang berbagi dompet) menjadi satu **unit pembayaran patungan**. Saat pembagian biaya, satu grup dihitung sebagai **satu peserta** dan tagihannya menjadi **tanggungan bersama** grup, sehingga anggota dalam satu grup tidak saling berutang dan diperlakukan sebagai satu pihak dalam balance & settlement.
+
+> Catatan ruang lingkup: fitur ini fokus pada **pembentukan & pengelolaan grup** (CRUD grup, menambah/mengeluarkan anggota) dan **mendefinisikan kontrak** bagaimana grup diperlakukan sebagai satu unit. **Konsumsi** kontrak ini — yaitu perhitungan equal split berbasis unit dan agregasi balance per grup — diimplementasikan pada fitur terpisah [Split Expense Logic](#fitur-berikutnya) dan Balance Calculation. Fitur ini hanya menyediakan data grup dan aturannya.
+
+### 6.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- OWNER dapat membuat grup baru di dalam sebuah trip (nama wajib, warna/label opsional untuk badge)
+- OWNER dapat menambah & mengeluarkan member trip (user maupun guest) dari grup
+- OWNER dapat mengganti nama grup
+- OWNER dapat menghapus grup (anggota tidak ikut terhapus, hanya dilepas dari grup)
+- Satu member maksimal tergabung di **satu grup** pada satu waktu
+- Menampilkan daftar grup beserta anggotanya di halaman trip (semua member dapat melihat, badge grup tampil di daftar member)
+- Member yang belum masuk grup tetap diperlakukan sebagai unit individual
+- Kontrak split & balance terdefinisi: grup = 1 unit peserta; anggota se-grup tidak saling berutang; balance/settlement direpresentasikan per grup/individual
+
+**Tidak termasuk MVP (future):**
+- Perhitungan equal split berbasis unit grup → [Split Expense Logic](#fitur-berikutnya)
+- Agregasi balance & settlement per grup → fitur Balance/Settlement
+- Member tergabung di lebih dari satu grup
+- Grup lintas trip (grup hanya berlaku di dalam satu trip)
+- Pembagian internal di dalam grup (mis. siapa di grup yang menanggung berapa)
+- Member biasa (non-OWNER) membuat / mengelola grup
+- Nested group (grup di dalam grup)
+- Riwayat / audit log perubahan grup
+
+### 6.3 Entity / Data Model (Prisma)
+
+Menambah satu model baru `MemberGroup` (mis. `prisma/schema/group.prisma`, mengikuti pola multi-file schema) dan menambah relasi opsional pada `TripMember`. **Tidak** mengubah model `Expense`/`ExpenseShare`.
+
+```
+model MemberGroup {
+  id        String   @id @default(cuid())
+  tripId    String
+  name      String
+  color     String?                   # opsional, untuk badge UI
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trip      Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  members   TripMember[]
+
+  @@index([tripId])
+  @@map("member_group")
+}
+```
+
+Perubahan pada `TripMember` (additive):
+```
+model TripMember {
+  ...
+  groupId   String?
+  group     MemberGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  @@index([groupId])
+}
+```
+
+**Catatan:**
+- `groupId` **nullable** → null berarti member berdiri sendiri sebagai unit individual.
+- `onDelete: SetNull` pada relasi grup → menghapus grup hanya melepas anggota (groupId di-null-kan), tidak menghapus member maupun expense lama.
+- `onDelete: Cascade` dari `Trip` → grup ikut terhapus saat trip dihapus.
+- Karena `groupId` tunggal, satu member otomatis maksimal di satu grup (tidak perlu tabel pivot).
+- Grup hanya boleh beranggotakan `TripMember` dari trip yang sama (divalidasi di service).
+- Migrasi additive baru: `add_member_group` (non-destruktif).
+
+### 6.4 Halaman / Route
+
+| Route | Tipe | Akses | Deskripsi |
+|---|---|---|---|
+| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan daftar grup + badge grup pada daftar member |
+| `/trips/[id]/groups` | Protected | OWNER only | Halaman kelola grup (buat, ubah, hapus, atur anggota) |
+| `/api/trips/[id]/groups` | API | Member (GET) / OWNER (POST) | `GET` list grup, `POST` buat grup |
+| `/api/trips/[id]/groups/[groupId]` | API | OWNER only | `PATCH` ubah nama / set anggota, `DELETE` hapus grup |
+
+> Catatan: pengelolaan keanggotaan dilakukan via `PATCH` grup dengan mengirim daftar `memberIds` lengkap (server menyelaraskan: melepas anggota yang dihapus, memasang anggota baru) agar idempotent dan menghindari endpoint mikro berlebihan.
+
+### 6.5 User Flow
+
+#### A. Flow Buat Grup (OWNER)
+1. OWNER membuka `/trips/[id]/groups` (atau panel "Kelola Grup" di detail trip)
+2. Klik "Buat Grup" → isi nama grup (wajib), pilih warna (opsional), centang member yang akan masuk grup
+3. Client-side: validasi Zod (nama min 1, max 40; member opsional)
+4. Submit → `POST /api/trips/[id]/groups`
+5. Server: cek auth + assert OWNER → validasi semua `memberIds` adalah member trip ini & belum tergabung grup lain → buat `MemberGroup` + set `groupId` anggota dalam satu transaction
+6. Sukses → refresh data + toast "Grup dibuat"
+
+#### B. Flow Atur Anggota Grup (OWNER)
+1. OWNER memilih sebuah grup → "Atur Anggota"
+2. Menampilkan daftar member trip dengan status grup masing-masing (member yang sudah di grup lain ditandai)
+3. OWNER mencentang/menghapus member → submit `PATCH /api/trips/[id]/groups/[groupId]` dengan `memberIds` final
+4. Server: assert OWNER → member yang dipindahkan dari grup lain otomatis dilepas dari grup lamanya → update dalam transaction
+5. Refresh data + toast "Anggota grup diperbarui"
+
+#### C. Flow Ubah Nama Grup (OWNER)
+1. OWNER klik "Ubah Nama" → edit nama/warna → `PATCH /api/trips/[id]/groups/[groupId]`
+2. Refresh data + toast sukses
+
+#### D. Flow Hapus Grup (OWNER)
+1. OWNER klik "Hapus Grup" → konfirmasi (bottom sheet di mobile): "Anggota akan kembali menjadi individual"
+2. Confirm → `DELETE /api/trips/[id]/groups/[groupId]`
+3. Server: assert OWNER → hapus grup (anggota di-`SetNull`, tetap menjadi member trip)
+4. Refresh data + toast "Grup dihapus"
+
+#### E. Flow Lihat Grup (semua member)
+1. Member membuka `/trips/[id]`
+2. Daftar member menampilkan badge grup (nama/warna) bagi yang tergabung
+3. Section grup menampilkan tiap grup beserta anggotanya; member non-grup ditampilkan sebagai individual
+
+### 6.6 Technical Flow
+
+**Stack:**
+- Server Component untuk list grup & halaman kelola (initial fetch via service langsung)
+- Client Component untuk form/aksi (buat, atur anggota, ubah nama, hapus)
+- Hook pola **`useState`/`useTransition` + `router.refresh()`** (mengikuti pola existing, project belum memakai React Query)
+- Zod untuk validation di client & server
+- Prisma **transaction** saat buat/atur anggota (sinkronisasi `groupId` banyak member atomik)
+- Reuse `requireSessionUser`, `assertTripAccess`/`assertTripMember`, format response `ok/created/fail/handleApiError`, error class `TripForbiddenError`/`TripNotFoundError`
+
+**Kontrak untuk Split & Balance (didefinisikan di sini, dikonsumsi fitur lain):**
+- **Unit peserta** dalam equal split = jumlah member individual yang menjadi peserta + jumlah grup yang punya ≥1 anggota peserta. Setiap unit mendapat 1 bagian; sisa pembagian mengikuti aturan deterministik `calculateEqualShares`.
+- Bagian sebuah grup adalah **tanggungan bersama** grup — anggota di dalam satu grup **tidak saling berutang**.
+- Balance & settlement memperlakukan grup sebagai **satu pihak** (utang/piutang grup direpresentasikan atas nama grup), member non-grup sebagai pihak individual.
+- Balance dihitung **on-the-fly** dari data expense + komposisi grup terkini, sehingga perubahan grup langsung tercermin tanpa memigrasi data expense lama.
+
+**Struktur file (diusulkan):**
+```
+src/
+  app/
+    (protected)/
+      trips/
+        [id]/
+          page.tsx                       # sisipkan <GroupSection /> + badge grup di daftar member
+          groups/
+            page.tsx                     # halaman kelola grup (OWNER)
+    api/
+      trips/
+        [id]/
+          groups/
+            route.ts                     # GET list, POST create
+            [groupId]/route.ts           # PATCH update/set anggota, DELETE
+  features/
+    group/
+      components/
+        GroupSection.tsx                 # daftar grup + anggota di detail trip
+        GroupList.tsx
+        GroupCard.tsx                    # nama, warna, anggota
+        GroupForm.tsx                    # reusable buat + ubah nama/warna
+        GroupMemberPicker.tsx            # pilih anggota dari member trip
+        GroupBadge.tsx                   # badge grup pada daftar member
+        DeleteGroupDialog.tsx
+      hooks/
+        useCreateGroup.ts
+        useUpdateGroup.ts
+        useDeleteGroup.ts
+      schemas/
+        groupSchema.ts                   # createGroupSchema, updateGroupSchema
+      services/
+        createGroup.ts
+        getGroupsByTripId.ts
+        updateGroup.ts                   # ubah nama + sinkron anggota
+        deleteGroup.ts
+        assertTripOwner.ts               # reuse helper existing bila ada
+  lib/
+    api/
+      group/
+        createGroup.ts                   # client fetch wrapper
+        getGroups.ts
+        updateGroup.ts
+        deleteGroup.ts
+  types/
+    group.ts                             # MemberGroup, GroupWithMembers, input types
+```
+
+**Tambahan tipe (`src/types/group.ts`):**
+```
+export interface MemberGroup {
+  id: string;
+  tripId: string;
+  name: string;
+  color: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface GroupMemberSummary {
+  id: string;          // TripMember.id
+  displayName: string; // nama user atau guestName
+  isGuest: boolean;
+}
+
+export interface GroupWithMembers extends MemberGroup {
+  members: GroupMemberSummary[];
+}
+
+export interface CreateGroupInput {
+  name: string;
+  color?: string;
+  memberIds: string[];
+}
+
+export type UpdateGroupInput = Partial<CreateGroupInput>;
+```
+
+**Validation (Zod):**
+- `createGroupSchema`: name (min 1, max 40), color (string opsional), memberIds (array string, default `[]`)
+- `updateGroupSchema`: partial dari create
+
+**Authorization rules:**
+- `GET /api/trips/[id]/groups`: wajib login + `assertTripMember`
+- `POST` / `PATCH` / `DELETE`: wajib login + assert **OWNER** trip
+- Semua `memberIds` divalidasi sebagai `TripMember` dari trip yang sama
+- Memindahkan member yang sudah ada di grup lain → otomatis dilepas dari grup lama (bukan error)
+
+**Error handling:**
+- 401 belum login
+- 403 aksi kelola oleh non-OWNER → "Hanya pemilik trip yang dapat mengelola grup"
+- 404 grup / trip tidak ditemukan atau bukan member
+- 422 validation gagal (nama kosong, memberId bukan member trip)
+- Jangan expose raw error database
+
+### 6.7 Dependencies & Environment
+- **Tidak ada dependency baru** dan **tidak ada environment variable baru** untuk MVP ini.
+
+### 6.8 Acceptance Criteria MVP
+
+- [ ] OWNER dapat membuat grup dengan nama (dan warna opsional)
+- [ ] OWNER dapat menambah & mengeluarkan anggota grup (user & guest)
+- [ ] OWNER dapat mengganti nama grup
+- [ ] OWNER dapat menghapus grup tanpa menghapus member-nya
+- [ ] Satu member maksimal tergabung di satu grup (pindah grup otomatis melepas grup lama)
+- [ ] Non-OWNER tidak melihat aksi kelola grup (403 jika dipaksa via API)
+- [ ] `memberIds` di luar member trip ditolak
+- [ ] Daftar grup & badge grup tampil di detail trip untuk semua member
+- [ ] Member tanpa grup tetap tampil sebagai individual
+- [ ] Menghapus grup mengembalikan anggota menjadi individual (expense lama tetap valid)
+- [ ] Kontrak split/balance terdokumentasi (grup = 1 unit, anggota tidak saling berutang)
+- [ ] Validation jalan di client & server
+- [ ] Empty state tampil saat belum ada grup
+- [ ] Mobile-friendly (tap area ≥ 44px, sticky CTA, bottom sheet konfirmasi)
+- [ ] Dark mode support
+- [ ] Loading & error state konsisten
+
+### 6.9 Checklist Implementasi
+
+**Database:**
+- [ ] Tambah model `MemberGroup` (mis. `prisma/schema/group.prisma`)
+- [ ] Tambah `groupId` + relasi `group` (opsional, `onDelete: SetNull`) di `TripMember`
+- [ ] Tambah relasi balik `members` di `MemberGroup` & `groups` di `Trip` (jika diperlukan)
+- [ ] Run migration `add_member_group` (additive)
+
+**Types & Schema:**
+- [ ] Buat `src/types/group.ts`
+- [ ] Buat `createGroupSchema`, `updateGroupSchema` (Zod)
+
+**Service Layer:**
+- [ ] `createGroup` (transaction: buat grup + set groupId anggota, validasi member)
+- [ ] `getGroupsByTripId` (grup + anggota + displayName)
+- [ ] `updateGroup` (ubah nama/warna + sinkron anggota dalam transaction)
+- [ ] `deleteGroup` (assert OWNER, anggota di-SetNull)
+- [ ] Helper assert OWNER (reuse existing bila ada)
+
+**API Routes:**
+- [ ] `GET /api/trips/[id]/groups`
+- [ ] `POST /api/trips/[id]/groups`
+- [ ] `PATCH /api/trips/[id]/groups/[groupId]`
+- [ ] `DELETE /api/trips/[id]/groups/[groupId]`
+
+**Client Fetch (`src/lib/api/group`):**
+- [ ] `createGroup.ts`
+- [ ] `getGroups.ts`
+- [ ] `updateGroup.ts`
+- [ ] `deleteGroup.ts`
+
+**UI Pages:**
+- [ ] `/trips/[id]/groups` (kelola grup, OWNER)
+- [ ] Sisipkan `GroupSection` + badge grup di `/trips/[id]`
+
+**Components:**
+- [ ] `GroupSection`, `GroupList`, `GroupCard`
+- [ ] `GroupForm` (reusable buat + ubah)
+- [ ] `GroupMemberPicker`
+- [ ] `GroupBadge`
+- [ ] `DeleteGroupDialog`
+
+**Hooks:**
+- [ ] `useCreateGroup`, `useUpdateGroup`, `useDeleteGroup` (pola `router.refresh()`)
+
+**QA (manual):**
+- [ ] Test buat grup sukses + dengan anggota
+- [ ] Test buat grup dengan validation error (nama kosong, memberId invalid)
+- [ ] Test atur anggota (tambah, keluarkan, pindah dari grup lain)
+- [ ] Test ubah nama grup
+- [ ] Test hapus grup (anggota kembali individual, expense lama tetap ada)
+- [ ] Test kelola grup oleh non-OWNER (403)
+- [ ] Test tampil badge & daftar grup untuk member biasa
+- [ ] Test dark mode & layout mobile (form, list, dialog)
+
+### 6.10 Status
+
+**Current status:** Belum dimulai
+**Target selesai:** TBD
+**Catatan:** Bergantung pada [Create Trip](#2-create-trip--room-mvp) & [Join Trip](#4-join-trip-user--guest-mvp) (butuh trip + daftar member, termasuk guest). Menjadi prasyarat / masukan bagi [Split Expense Logic](#fitur-berikutnya), Balance Calculation, dan Settlement Calculation yang akan memperlakukan grup sebagai satu unit pembayaran.
+
+---
+
 ## Fitur Berikutnya
 
-- [ ] Group Member
 - [ ] Split Expense Logic
 - [ ] Balance Calculation
 - [ ] Settlement Calculation
