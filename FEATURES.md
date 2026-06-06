@@ -2077,8 +2077,222 @@ export interface TripBalanceSummary {
 
 ---
 
+## 9. Settlement Calculation (MVP)
+
+### 9.1 Tujuan
+Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calculation-mvp)) menjadi **daftar transaksi pelunasan yang konkret**: siapa harus mentransfer ke siapa dan berapa, dengan **jumlah transaksi seminimal mungkin**. Tujuannya agar grup tahu langkah praktis untuk saling membayar dan menutup seluruh utang-piutang trip.
+
+> Catatan ruang lingkup: fitur ini fokus pada **perhitungan & menampilkan rekomendasi transaksi pelunasan** (read-only, on-the-fly) dari saldo bersih. Fitur ini **tidak** menyimpan, menandai lunas, atau mencatat pembayaran nyata — itu didetailkan pada fitur terpisah **Mark Settlement as Paid**. Fitur ini **mengkonsumsi kontrak** dari Balance Calculation (`BalanceUnit.balance` per pihak) dan **tidak mengubah** data apa pun. Satuan pihak = **unit** (member individual + grup), konsisten dengan Balance (grup = 1 pihak, anggota se-grup tidak saling membayar).
+
+### 9.2 Scope MVP
+
+**Termasuk dalam MVP:**
+- Perhitungan settlement **on-the-fly** dari `TripBalanceSummary` (tanpa menyimpan hasil / tanpa tabel baru)
+- Algoritma **minimisasi jumlah transfer** (greedy: cocokkan utang terbesar dengan piutang terbesar) menghasilkan **≤ (jumlah pihak − 1)** transaksi
+- Tiap transaksi memuat: pihak pembayar (`from`), pihak penerima (`to`), dan nominal (minor unit)
+- Satuan pihak = **unit** (member individual + grup); grup sebagai satu pihak (pembayar/penerima atas nama grup)
+- Section "Pelunasan" di halaman detail trip (`/trips/[id]`) menampilkan daftar transaksi "**A → B: Rp…**"
+- Format nominal sesuai `Trip.currency` (`Intl.NumberFormat`)
+- Empty / zero state (belum ada expense, atau semua sudah impas → "tidak ada yang perlu dibayar")
+- Trip `ARCHIVED` tetap bisa dilihat rekomendasinya (read-only)
+- Deterministik: input saldo yang sama selalu menghasilkan daftar transaksi & urutan yang sama
+- Invarian: `Σ nominal transaksi === Σ saldo positif (piutang) === Σ |saldo negatif| (utang)`; setelah seluruh transaksi diterapkan, semua saldo menjadi 0
+
+**Tidak termasuk MVP (future):**
+- Tandai transaksi sebagai **lunas** / catat pembayaran nyata → **Mark Settlement as Paid**
+- Pelunasan parsial / cicil sebagian transaksi
+- Penyesuaian manual / override siapa-bayar-siapa
+- Pelunasan lintas trip atau multi-currency
+- Pembagian internal pelunasan di dalam grup (grup tetap satu pihak)
+- Notifikasi / reminder pembayaran
+- Riwayat / snapshot settlement per waktu
+- Export (PDF / share) daftar pelunasan
+
+### 9.3 Entity / Data Model (Prisma)
+
+**Tidak menambah tabel, kolom, atau migration apa pun.** Settlement dihitung sepenuhnya dari output Balance Calculation yang sendirinya read-only:
+
+- Input: `TripBalanceSummary.units[]` → tiap `BalanceUnit` punya `balance = paid − owed`
+- Tidak ada Prisma write; perubahan expense / grup langsung tercermin pada rekomendasi tanpa migrasi data
+
+**Catatan:**
+- Karena murni dihitung ulang, settlement selalu sinkron dengan saldo terbaru.
+- (Future) saat fitur **Mark as Paid** dibuat, baru ditambahkan tabel `Settlement` (mis. `tripId`, `fromUnit`, `toUnit`, `amount`, `paidAt`, `status`) untuk mencatat pelunasan nyata — di luar scope MVP ini.
+
+### 9.4 Halaman / Route
+
+| Route | Tipe | Akses | Deskripsi |
+|---|---|---|---|
+| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section "Pelunasan" (daftar transaksi yang disarankan) |
+
+> Mengikuti pola fitur sebelumnya (Server Component memanggil service langsung, project belum memakai React Query), **tidak dibuat endpoint API baru**. Section pelunasan dirender di Server Component detail trip via service `getTripSettlement(tripId)`. Endpoint `GET /api/trips/[id]/settlement` **opsional di masa depan** bila dibutuhkan fetch client-side (mis. saat Mark as Paid).
+
+### 9.5 User Flow
+
+#### A. Flow Lihat Pelunasan (semua member)
+1. Member membuka `/trips/[id]`
+2. Server Component memanggil `getTripSettlement(tripId)` (setelah `assertTripMember`)
+3. Section "Pelunasan" menampilkan daftar transaksi yang disarankan, tiap baris: **nama/badge pihak pembayar → nama/badge pihak penerima : nominal terformat**
+4. Tampilkan ringkasan singkat (mis. jumlah transaksi yang perlu dilakukan)
+5. Urutan tampil deterministik (mis. nominal desc, tie-break by nama pembayar lalu penerima)
+
+#### B. Flow Empty / Zero State
+1. Belum ada expense → empty state "Belum ada pengeluaran" + CTA "Tambah Pengeluaran"
+2. Ada expense tapi semua saldo impas → info "Semua sudah impas, tidak ada yang perlu dibayar"
+
+#### C. Flow Trip Diarsipkan
+1. Trip `ARCHIVED` → rekomendasi tetap dihitung & ditampilkan (read-only), tanpa CTA tambah expense
+
+### 9.6 Technical Flow
+
+**Stack:**
+- Server Component untuk render section pelunasan (initial fetch via service langsung)
+- Tanpa Client Component / hook mutation (read-only)
+- Reuse `getTripBalances` (Balance Calculation) sebagai sumber saldo, `getCurrentMember`/`assertTripMember`, error class `TripNotFoundError`/`TripForbiddenError`
+- **Tidak** ada Prisma write — hanya menurunkan dari saldo yang sudah dibaca
+
+**Helper inti — `calculateSettlement` (pure, deterministik, mudah dites):**
+```
+type SettlementUnitLite = {
+  refId: string;            // BalanceUnit.refId
+  type: "member" | "group";
+  displayName: string;
+  isGuest: boolean;
+  balance: number;          // paid - owed (minor unit)
+};
+
+calculateSettlement(units: SettlementUnitLite[]): SettlementTransaction[]
+```
+Algoritma (greedy minimisasi transfer):
+1. Pisahkan unit menjadi **debtors** (`balance < 0`) dan **creditors** (`balance > 0`); abaikan yang `balance === 0`.
+2. Urutkan deterministik: debtors by `|balance|` desc (tie-break nama asc), creditors by `balance` desc (tie-break nama asc) — agar hasil stabil.
+3. Selama masih ada debtor & creditor:
+   - Ambil debtor & creditor teratas.
+   - `amount = min(|debtor.balance|, creditor.balance)`.
+   - Catat transaksi `{ from: debtor, to: creditor, amount }`.
+   - Kurangi kedua saldo sebesar `amount`; buang unit yang saldonya mencapai 0.
+4. Kembalikan daftar transaksi.
+
+**Invarian wajib (diuji):**
+- `Σ amount transaksi === Σ saldo positif === Σ |saldo negatif|`
+- Setelah semua transaksi diterapkan ke saldo awal → semua saldo = 0
+- Jumlah transaksi ≤ `(jumlah pihak non-impas − 1)`
+- Tidak ada transaksi bernominal 0; tidak ada pihak yang membayar ke dirinya sendiri
+- Karena `Σ balance === 0` (dijamin Balance Calculation), proses selalu konvergen
+
+**Service — `getTripSettlement(tripId, userId)`:**
+- Reuse `getTripBalances(tripId, userId)` (sudah meng-assert member + menghitung saldo)
+- Map `units` → input `calculateSettlement` → kembalikan `TripSettlementSummary` (currency, totalSettlement, transactions)
+
+**Struktur file (diusulkan — perlu konfirmasi pembuatan folder `features/settlement`):**
+```
+src/
+  app/
+    (protected)/
+      trips/
+        [id]/
+          page.tsx                       # sisipkan <SettlementSection />
+  features/
+    settlement/
+      components/
+        SettlementSection.tsx            # section pelunasan: daftar transaksi + empty/zero state
+      services/
+        calculateSettlement.ts           # helper pure (greedy minimisasi transfer)
+        getTripSettlement.ts             # reuse getTripBalances + calculate
+  types/
+    settlement.ts                        # SettlementTransaction, TripSettlementSummary
+```
+
+**Tambahan tipe (`src/types/settlement.ts`):**
+```
+export interface SettlementParty {
+  refId: string;            // BalanceUnit.refId (TripMember.id atau MemberGroup.id)
+  type: "member" | "group";
+  displayName: string;
+  isGuest: boolean;
+}
+
+export interface SettlementTransaction {
+  from: SettlementParty;    // pihak yang membayar (berutang)
+  to: SettlementParty;      // pihak yang menerima (berpiutang)
+  amount: number;           // nominal transfer (minor unit)
+}
+
+export interface TripSettlementSummary {
+  currency: string;
+  totalExpense: number;     // dipakai UI untuk membedakan empty vs impas
+  totalSettlement: number;  // Σ amount semua transaksi (minor unit)
+  transactions: SettlementTransaction[];
+}
+```
+
+**Authorization rules:**
+- Akses pelunasan = **member trip** (`assertTripMember`, lewat reuse `getTripBalances`). Tidak ada aksi mutasi → tidak ada cek OWNER.
+- Tidak membocorkan data sensitif tambahan (hanya turunan dari saldo yang sudah boleh dilihat member).
+
+**Error handling:**
+- 401 belum login
+- 404 trip tidak ditemukan atau pengakses bukan member
+- Jangan expose raw error database
+- Saldo yang tidak konvergen (anomali `Σ balance ≠ 0`) → diperlakukan defensif: hentikan loop saat salah satu sisi habis, sisa diabaikan tanpa crash, dan dicatat sebagai edge case future
+
+### 9.7 Dependencies & Environment
+- **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
+- Formatting nominal memakai helper currency existing (`Intl.NumberFormat` sesuai `Trip.currency`).
+
+### 9.8 Acceptance Criteria MVP
+
+- [x] Settlement dihitung on-the-fly dari saldo bersih (tanpa tabel/penyimpanan baru)
+- [x] Algoritma menghasilkan jumlah transaksi minimal (≤ jumlah pihak non-impas − 1)
+- [x] Tiap transaksi memuat pembayar, penerima, dan nominal yang benar
+- [x] Grup diperlakukan sebagai satu pihak (membayar/menerima atas nama grup)
+- [x] `Σ amount transaksi === Σ piutang === Σ utang`; saldo akhir semua pihak = 0
+- [x] Tidak ada transaksi bernominal 0 atau pihak membayar ke dirinya sendiri
+- [x] Hasil deterministik (input sama → daftar & urutan transaksi sama)
+- [x] Section pelunasan tampil di detail trip untuk semua member
+- [x] Empty state saat belum ada expense; info impas saat semua saldo 0
+- [x] Rekomendasi tetap tampil (read-only) di trip diarsipkan
+- [x] Nominal terformat sesuai currency trip
+- [ ] Non-member tidak bisa melihat pelunasan (404)
+- [ ] Mobile-friendly (baris transaksi terbaca, arah transfer jelas)
+- [ ] Dark mode support
+- [ ] Loading & error state konsisten
+
+### 9.9 Checklist Implementasi
+
+**Database:**
+- [x] Tidak ada perubahan schema / migration (read-only)
+
+**Types:**
+- [x] Buat `src/types/settlement.ts` (`SettlementParty`, `SettlementTransaction`, `TripSettlementSummary`)
+
+**Service Layer:**
+- [x] `calculateSettlement` (helper pure: greedy minimisasi transfer, deterministik, invarian saldo akhir = 0)
+- [x] `getTripSettlement` (reuse `getTripBalances` + map unit + calculate)
+
+**UI:**
+- [x] Sisipkan `SettlementSection` di `/trips/[id]`
+- [x] `SettlementSection` (satu komponen: daftar transaksi + empty/zero state) — disederhanakan, anti over-engineering
+
+**QA (manual):**
+- [ ] Test settlement dasar (beberapa debtor & creditor) — arah & nominal benar
+- [ ] Test dengan grup (grup sebagai pembayar / penerima)
+- [ ] Test jumlah transaksi minimal (mis. 3 orang → ≤ 2 transaksi)
+- [ ] Test invarian: saldo akhir semua pihak = 0
+- [ ] Test empty state & semua impas (tidak ada transaksi)
+- [ ] Test trip archived (rekomendasi read-only tampil)
+- [ ] Test non-member (404)
+- [ ] Test determinisme (refresh → hasil identik)
+- [ ] Test dark mode & layout mobile
+
+### 9.10 Status
+
+**Current status:** Implementasi MVP selesai; QA manual/test otomatis belum ditambahkan
+**Target selesai:** TBD
+**Catatan:** Bergantung pada [Balance Calculation](#8-balance-calculation-mvp) (saldo bersih per pihak adalah input utama). Menjadi prasyarat untuk fitur **Mark Settlement as Paid** (mencatat pelunasan nyata berdasarkan rekomendasi transaksi ini).
+
+---
+
 ## Fitur Berikutnya
 
-- [ ] Settlement Calculation
 - [ ] Trip Summary
-- [ ] User Profile

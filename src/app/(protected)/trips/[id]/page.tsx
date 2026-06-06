@@ -12,17 +12,17 @@ import { GroupSection } from "@/features/group/components/GroupSection";
 import { getTripGroups } from "@/features/group/services/getTripGroups";
 import { BalanceSection } from "@/features/balance/components/BalanceSection";
 import { getTripBalances } from "@/features/balance/services/getTripBalances";
+import { SettlementSection } from "@/features/settlement/components/SettlementSection";
+import { getTripSettlement } from "@/features/settlement/services/getTripSettlement";
 import { requireSessionUser } from "@/lib/auth/getSessionUser";
 
 interface TripDetailPageProps {
   params: Promise<{ id: string }>;
 }
 
-
-
-
-
-export default async function TripDetailPage({ params }: TripDetailPageProps): Promise<JSX.Element> {
+export default async function TripDetailPage({
+  params,
+}: TripDetailPageProps): Promise<JSX.Element> {
   const user = await requireSessionUser();
   const { id } = await params;
 
@@ -38,6 +38,7 @@ export default async function TripDetailPage({ params }: TripDetailPageProps): P
   const expenses = await getExpensesByTripId(id, user.id);
   const groupData = await getTripGroups(id, user.id);
   const balances = await getTripBalances(id, user.id);
+  const settlement = await getTripSettlement(id, user.id);
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8">
@@ -56,6 +57,8 @@ export default async function TripDetailPage({ params }: TripDetailPageProps): P
       <ExpenseSection tripId={trip.id} expenses={expenses} />
 
       <BalanceSection summary={balances} />
+
+      <SettlementSection summary={settlement} />
     </main>
   );
 }
