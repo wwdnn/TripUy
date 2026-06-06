@@ -16,11 +16,13 @@ Setiap fitur dijelaskan: tujuan, scope MVP, flow user, technical flow, dan check
 ## 1. Authentication (MVP)
 
 ### 1.1 Tujuan
+
 Memungkinkan user mendaftar, masuk, dan keluar dari aplikasi dengan aman, sehingga setiap trip dan expense dapat dikaitkan dengan identitas user yang valid.
 
 ### 1.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Register dengan email + password
 - Login dengan email + password
 - Login dengan Google OAuth
@@ -31,6 +33,7 @@ Memungkinkan user mendaftar, masuk, dan keluar dari aplikasi dengan aman, sehing
 - Email verification (opsional di MVP, tapi schema sudah disiapkan)
 
 **Tidak termasuk MVP (future):**
+
 - Forgot password / reset password
 - Login GitHub
 - Two-factor authentication (2FA)
@@ -79,16 +82,17 @@ Verification
 
 ### 1.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
-| `/login` | Public | Guest only | Form login email/password + tombol Google |
-| `/register` | Public | Guest only | Form register email/password |
-| `/dashboard` | Protected | Authenticated | Halaman utama setelah login |
-| `/api/auth/[...all]` | API | Public | Handler Better Auth (login, register, callback OAuth, dll) |
+| Route                | Tipe      | Akses         | Deskripsi                                                  |
+| -------------------- | --------- | ------------- | ---------------------------------------------------------- |
+| `/login`             | Public    | Guest only    | Form login email/password + tombol Google                  |
+| `/register`          | Public    | Guest only    | Form register email/password                               |
+| `/dashboard`         | Protected | Authenticated | Halaman utama setelah login                                |
+| `/api/auth/[...all]` | API       | Public        | Handler Better Auth (login, register, callback OAuth, dll) |
 
 ### 1.5 User Flow
 
 #### A. Flow Register (Email + Password)
+
 1. User membuka `/register`
 2. User mengisi form: `name`, `email`, `password`, `confirmPassword`
 3. Client-side: validasi Zod (email format, password min 8 char, password match)
@@ -99,6 +103,7 @@ Verification
 8. Jika email sudah terdaftar → tampilkan error "Email sudah digunakan"
 
 #### B. Flow Login (Email + Password)
+
 1. User membuka `/login`
 2. User mengisi form: `email`, `password`
 3. Submit → call `authClient.signIn.email({ email, password })`
@@ -107,6 +112,7 @@ Verification
 6. Jika invalid → tampilkan error "Email atau password salah"
 
 #### C. Flow Login (Google OAuth)
+
 1. User klik tombol "Lanjut dengan Google" di `/login` atau `/register`
 2. Call `authClient.signIn.social({ provider: "google", callbackURL: "/dashboard" })`
 3. Redirect ke Google OAuth consent screen
@@ -118,12 +124,14 @@ Verification
 6. Redirect ke `/dashboard`
 
 #### D. Flow Logout
+
 1. User klik tombol Logout (di header/menu)
 2. Call `authClient.signOut()`
 3. Better Auth hapus session + clear cookie
 4. Redirect ke `/login`
 
 #### E. Flow Protected Route
+
 1. User akses route protected (misal `/dashboard`, `/trips`)
 2. Middleware Next.js cek session cookie
 3. Jika tidak ada session valid → redirect ke `/login?redirect=<original-path>`
@@ -133,12 +141,14 @@ Verification
 ### 1.6 Technical Flow
 
 **Stack auth:**
+
 - Better Auth sebagai library utama
 - Prisma adapter (PostgreSQL)
 - Cookie-based session
 - Middleware Next.js untuk route protection
 
 **Struktur file:**
+
 ```
 src/
   app/
@@ -179,15 +189,18 @@ src/
 ```
 
 **Session strategy:**
+
 - Server Component: ambil session via `auth.api.getSession({ headers })`
 - Client Component: ambil session via `authClient.useSession()` hook
 - Middleware: cek session cookie, redirect jika tidak valid
 
 **Validation:**
+
 - Login schema: email valid + password min 8 char
 - Register schema: name min 2 char, email valid, password min 8 char, confirmPassword match
 
 **Error handling:**
+
 - Form error ditampilkan di field terkait
 - Network error → toast "Terjadi kesalahan, coba lagi"
 - Credential salah → message generic "Email atau password salah" (jangan bocorkan mana yang salah)
@@ -222,6 +235,7 @@ GOOGLE_CLIENT_SECRET
 ### 1.9 Checklist Implementasi
 
 **Setup:**
+
 - [ ] Install dependencies (`better-auth`, `@prisma/client`, `prisma`, `zod`)
 - [ ] Setup Prisma schema (User, Session, Account, Verification)
 - [ ] Run migration awal
@@ -231,10 +245,12 @@ GOOGLE_CLIENT_SECRET
 - [ ] Setup `.env.local` dengan semua variable auth
 
 **API:**
+
 - [ ] Buat handler `/api/auth/[...all]/route.ts`
 - [ ] Buat middleware route protection di `src/middleware.ts`
 
 **UI — Auth Pages:**
+
 - [ ] Layout `(auth)` group
 - [ ] Halaman `/login` + `LoginForm`
 - [ ] Halaman `/register` + `RegisterForm`
@@ -242,16 +258,19 @@ GOOGLE_CLIENT_SECRET
 - [ ] Component `LogoutButton`
 
 **Logic:**
+
 - [ ] Schema validasi `loginSchema`, `registerSchema` (Zod)
 - [ ] Hook `useSession`
 - [ ] Store `useAuthStore` untuk current user
 - [ ] Error handling konsisten
 
 **Protected:**
+
 - [ ] Layout `(protected)` group
 - [ ] Halaman placeholder `/dashboard`
 
 **QA:**
+
 - [ ] Test flow register (sukses + email duplikat)
 - [ ] Test flow login (sukses + credential salah)
 - [ ] Test flow Google OAuth
@@ -273,11 +292,13 @@ GOOGLE_CLIENT_SECRET
 ## 2. Create Trip / Room (MVP)
 
 ### 2.1 Tujuan
+
 Memungkinkan user yang sudah login untuk membuat sebuah "trip" (room perjalanan) sebagai wadah utama bagi semua aktivitas: mencatat pengeluaran, mengundang member, menghitung balance, hingga settlement.
 
 ### 2.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - User authenticated dapat membuat trip baru
 - Form input: nama trip, deskripsi (opsional), tanggal mulai, tanggal selesai (opsional), mata uang default
 - Auto-generate kode invite unik (untuk dipakai fitur invite di iterasi berikutnya)
@@ -290,6 +311,7 @@ Memungkinkan user yang sudah login untuk membuat sebuah "trip" (room perjalanan)
 - Archive / Unarchive trip — hanya OWNER
 
 **Tidak termasuk MVP (future):**
+
 - Invite member via kode / QR (fitur terpisah berikutnya)
 - Upload cover image trip
 - Kategori trip (liburan, kerja, dll)
@@ -344,25 +366,27 @@ enum TripRole {
 ```
 
 **Catatan:**
+
 - `inviteCode` di-generate saat trip dibuat (misal 8 karakter alfanumerik), unik global
 - Saat trip dibuat, otomatis insert 1 record `TripMember` dengan role `OWNER`
 - `onDelete: Cascade` pada TripMember agar member ter-clean saat trip dihapus
 
 ### 2.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
-| `/trips` | Protected | Authenticated | List semua trip milik user |
-| `/trips/new` | Protected | Authenticated | Form buat trip baru |
-| `/trips/[id]` | Protected | Member only | Detail trip |
-| `/trips/[id]/edit` | Protected | OWNER only | Form edit trip |
-| `/api/trips` | API | Authenticated | GET (list), POST (create) |
-| `/api/trips/[id]` | API | Member only | GET (detail), PATCH (update), DELETE |
-| `/api/trips/[id]/archive` | API | OWNER only | POST archive/unarchive |
+| Route                     | Tipe      | Akses         | Deskripsi                            |
+| ------------------------- | --------- | ------------- | ------------------------------------ |
+| `/trips`                  | Protected | Authenticated | List semua trip milik user           |
+| `/trips/new`              | Protected | Authenticated | Form buat trip baru                  |
+| `/trips/[id]`             | Protected | Member only   | Detail trip                          |
+| `/trips/[id]/edit`        | Protected | OWNER only    | Form edit trip                       |
+| `/api/trips`              | API       | Authenticated | GET (list), POST (create)            |
+| `/api/trips/[id]`         | API       | Member only   | GET (detail), PATCH (update), DELETE |
+| `/api/trips/[id]/archive` | API       | OWNER only    | POST archive/unarchive               |
 
 ### 2.5 User Flow
 
 #### A. Flow Create Trip
+
 1. User di `/dashboard` atau `/trips` klik tombol "Buat Trip Baru"
 2. Redirect ke `/trips/new`
 3. User mengisi form: `name` (wajib), `description` (opsional), `startDate` (wajib), `endDate` (opsional), `currency` (default IDR)
@@ -377,6 +401,7 @@ enum TripRole {
 8. Tampilkan toast "Trip berhasil dibuat"
 
 #### B. Flow List Trip
+
 1. User membuka `/trips`
 2. Server Component fetch list trip via service: `getTripsByUserId(userId)`
 3. Query mengambil semua trip yang user-nya jadi member, di-order berdasar `updatedAt DESC`
@@ -386,6 +411,7 @@ enum TripRole {
 6. Empty state jika belum punya trip → CTA "Buat Trip Baru"
 
 #### C. Flow Detail Trip
+
 1. User klik salah satu trip di list → `/trips/[id]`
 2. Server Component fetch detail trip via `getTripById(id, userId)`
 3. Cek user adalah member dari trip tersebut, jika tidak → 404 / redirect
@@ -396,6 +422,7 @@ enum TripRole {
    - MEMBER: hanya view + Leave trip (future)
 
 #### D. Flow Edit Trip
+
 1. OWNER klik tombol "Edit" di detail trip → `/trips/[id]/edit`
 2. Form prefilled dengan data trip
 3. Submit → `PATCH /api/trips/[id]`
@@ -403,6 +430,7 @@ enum TripRole {
 5. Update record → redirect balik ke `/trips/[id]` + toast sukses
 
 #### E. Flow Archive Trip
+
 1. OWNER klik tombol "Arsipkan" di detail trip
 2. Tampilkan konfirmasi (bottom sheet di mobile)
 3. Confirm → `POST /api/trips/[id]/archive`
@@ -410,6 +438,7 @@ enum TripRole {
 5. Refresh data → trip pindah ke tab "Diarsipkan"
 
 #### F. Flow Delete Trip
+
 1. OWNER klik tombol "Hapus" di detail trip
 2. Tampilkan konfirmasi dengan input ketik ulang nama trip
 3. Confirm → `DELETE /api/trips/[id]`
@@ -420,6 +449,7 @@ enum TripRole {
 ### 2.6 Technical Flow
 
 **Stack:**
+
 - Server Component untuk list & detail (initial fetch)
 - Client Component untuk form (interaction)
 - React Query untuk mutation (create, update, archive, delete)
@@ -427,6 +457,7 @@ enum TripRole {
 - Prisma transaction saat create (Trip + TripMember atomik)
 
 **Struktur file:**
+
 ```
 src/
   app/
@@ -485,21 +516,25 @@ src/
 ```
 
 **Validation (Zod):**
+
 - `createTripSchema`: name (min 3, max 60), description (max 500, optional), startDate (date), endDate (date, optional, >= startDate), currency (3 char ISO)
 - `updateTripSchema`: semua field optional, partial update
 
 **Authorization rules:**
+
 - Semua endpoint cek session (`auth.api.getSession`)
 - GET detail: user harus member dari trip
 - PATCH / DELETE / Archive: user harus OWNER
 - Helper service `assertTripOwner(tripId, userId)` dan `assertTripMember(tripId, userId)`
 
 **Invite code generation:**
+
 - 8 karakter, alfanumerik uppercase (exclude ambigu: 0, O, I, 1)
 - Loop generate sampai unik di database (max retry 5x)
 - Disimpan di Trip, dipakai untuk fitur invite di iterasi berikutnya
 
 **Error handling:**
+
 - 401 jika belum login
 - 403 jika bukan OWNER untuk aksi sensitif
 - 404 jika trip tidak ada atau user bukan member
@@ -529,16 +564,19 @@ src/
 ### 2.8 Checklist Implementasi
 
 **Database:**
+
 - [ ] Tambah model `Trip`, `TripMember` di Prisma schema
 - [ ] Tambah enum `TripStatus`, `TripRole`
 - [ ] Tambah relasi ke `User`
 - [ ] Run migration
 
 **Types & Schema:**
+
 - [ ] Buat `src/types/trip.ts`
 - [ ] Buat `createTripSchema`, `updateTripSchema` (Zod)
 
 **Service Layer:**
+
 - [ ] `createTrip` (dengan transaction Trip + TripMember)
 - [ ] `getTripById` (dengan assert member)
 - [ ] `getTripsByUserId` (filter by status)
@@ -549,6 +587,7 @@ src/
 - [ ] Helper `assertTripOwner`, `assertTripMember`
 
 **API Routes:**
+
 - [ ] `GET /api/trips`
 - [ ] `POST /api/trips`
 - [ ] `GET /api/trips/[id]`
@@ -557,12 +596,14 @@ src/
 - [ ] `POST /api/trips/[id]/archive`
 
 **UI Pages:**
+
 - [ ] `/trips` list page (Server Component)
 - [ ] `/trips/new` create page
 - [ ] `/trips/[id]` detail page (Server Component)
 - [ ] `/trips/[id]/edit` edit page
 
 **Components:**
+
 - [ ] `TripCard`
 - [ ] `TripList` + tab filter
 - [ ] `TripForm` (reusable create + edit)
@@ -574,15 +615,18 @@ src/
 - [ ] `ArchiveTripDialog`
 
 **Hooks:**
+
 - [ ] `useCreateTrip` (React Query mutation)
 - [ ] `useUpdateTrip`
 - [ ] `useDeleteTrip`
 - [ ] `useArchiveTrip`
 
 **Store:**
+
 - [ ] `useTripUiStore` (active tab filter)
 
 **QA:**
+
 - [ ] Test create trip sukses
 - [ ] Test create trip dengan validation error
 - [ ] Test list trip (member, OWNER, empty)
@@ -605,6 +649,7 @@ src/
 ## 3. Invite Member via Kode / QR (MVP)
 
 ### 3.1 Tujuan
+
 Memungkinkan OWNER (dan kelak member lain yang diizinkan) mengundang orang lain ke dalam sebuah trip secara mudah, baik dengan membagikan **kode invite**, **link invite**, maupun **QR code**, sehingga orang yang diundang dapat melihat preview trip sebelum bergabung.
 
 > Catatan ruang lingkup: fitur ini fokus pada **sisi mengundang dan membagikan** (generate, regenerate, share, preview trip dari kode). Proses **bergabung** (menjadi member baru) didetailkan pada fitur terpisah [Join Trip](#fitur-berikutnya-akan-didetailkan-setelah-invite-member-selesai), namun endpoint preview-by-code di sini menjadi prasyarat agar Join Trip bisa menampilkan info trip sebelum konfirmasi.
@@ -612,6 +657,7 @@ Memungkinkan OWNER (dan kelak member lain yang diizinkan) mengundang orang lain 
 ### 3.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Menampilkan kode invite trip (sudah di-generate saat trip dibuat) di halaman detail / panel invite
 - Salin kode invite ke clipboard
 - Membagikan **link invite** berisi kode (mis. `/join/<inviteCode>`) + tombol copy link
@@ -622,6 +668,7 @@ Memungkinkan OWNER (dan kelak member lain yang diizinkan) mengundang orang lain 
 - Panel "Kelola Undangan" hanya untuk OWNER
 
 **Tidak termasuk MVP (future):**
+
 - Eksekusi join / menambah member (ada di fitur Join Trip)
 - Invite via email / kirim notifikasi undangan
 - Multiple invite link dengan token & masa berlaku berbeda
@@ -642,24 +689,26 @@ Trip
 ```
 
 **Catatan:**
+
 - Regenerate hanya meng-update nilai `inviteCode` pada record `Trip` (tetap unik global, retry jika collision) sehingga kode lama otomatis invalid.
 - Tidak ada perubahan migration untuk MVP fitur ini.
 - (Future) jika butuh multiple link / expiry / max-uses, baru ditambahkan tabel `TripInvite` terpisah.
 
 ### 3.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
-| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan panel invite (full untuk OWNER) |
-| `/join/[code]` | Protected | Authenticated | Halaman preview trip dari kode + tombol "Gabung" (aksi join di fitur Join Trip) |
-| `/api/trips/[id]/invite` | API | OWNER only | `POST` regenerate kode invite |
-| `/api/trips/invite/[code]` | API | Authenticated | `GET` preview trip dari kode invite (data ringkas, non-sensitif) |
+| Route                      | Tipe      | Akses         | Deskripsi                                                                       |
+| -------------------------- | --------- | ------------- | ------------------------------------------------------------------------------- |
+| `/trips/[id]`              | Protected | Member only   | Detail trip — menampilkan panel invite (full untuk OWNER)                       |
+| `/join/[code]`             | Protected | Authenticated | Halaman preview trip dari kode + tombol "Gabung" (aksi join di fitur Join Trip) |
+| `/api/trips/[id]/invite`   | API       | OWNER only    | `POST` regenerate kode invite                                                   |
+| `/api/trips/invite/[code]` | API       | Authenticated | `GET` preview trip dari kode invite (data ringkas, non-sensitif)                |
 
 > Catatan: endpoint preview diletakkan di bawah `/api/trips/invite/[code]` (bukan `/api/trips/[id]`) karena pengakses belum tentu member dan hanya tahu kode, bukan `id`.
 
 ### 3.5 User Flow
 
 #### A. Flow Menampilkan & Membagikan Invite (OWNER)
+
 1. OWNER membuka `/trips/[id]`
 2. Pada panel "Undang Member" tampil: kode invite, link invite, dan QR code
 3. OWNER dapat:
@@ -669,6 +718,7 @@ Trip
    - Melihat QR code untuk discan langsung
 
 #### B. Flow Regenerate Kode (OWNER)
+
 1. OWNER klik "Buat ulang kode" di panel invite
 2. Tampilkan konfirmasi (bottom sheet di mobile): "Kode lama akan berhenti berlaku"
 3. Confirm → `POST /api/trips/[id]/invite`
@@ -676,6 +726,7 @@ Trip
 5. Refresh data → kode, link, dan QR ter-update + toast "Kode invite diperbarui"
 
 #### C. Flow Preview Trip dari Kode (calon member)
+
 1. Orang yang diundang membuka link `/join/<code>` atau memasukkan kode di halaman join
 2. Jika belum login → redirect ke `/login?redirect=/join/<code>`
 3. Setelah login → halaman fetch `GET /api/trips/invite/<code>`
@@ -690,6 +741,7 @@ Trip
 ### 3.6 Technical Flow
 
 **Stack:**
+
 - Server Component untuk halaman `/join/[code]` (initial preview fetch)
 - Client Component untuk panel invite (copy, share, QR, regenerate interaction)
 - React Query untuk mutation regenerate
@@ -697,6 +749,7 @@ Trip
 - Reuse helper `generateInviteCode`, `getSessionUser`, `assertTripAccess`, dan format response `ok/created/fail/handleApiError`
 
 **Struktur file:**
+
 ```
 src/
   app/
@@ -736,6 +789,7 @@ src/
 ```
 
 **Tambahan tipe (`src/types/trip.ts`):**
+
 ```
 export interface TripInvitePreview {
   id: string;
@@ -751,16 +805,19 @@ export interface TripInvitePreview {
 ```
 
 **Authorization rules:**
+
 - `POST /api/trips/[id]/invite` (regenerate): wajib login + assert OWNER (`assertTripAccess` role OWNER)
 - `GET /api/trips/invite/[code]` (preview): wajib login; tidak harus member, tapi response hanya data ringkas non-sensitif (tanpa list expense / member detail)
 - Jangan kembalikan `inviteCode` trip lain atau data internal di preview
 
 **Invite link & QR:**
+
 - Link dibentuk dari `NEXT_PUBLIC_APP_URL` + `/join/<inviteCode>` (jangan hardcode origin)
 - QR code merepresentasikan link invite (bukan hanya kode mentah) agar bisa langsung dibuka
 - QR digenerate sepenuhnya di client (tidak perlu endpoint server)
 
 **Error handling:**
+
 - 401 jika belum login
 - 403 jika regenerate dilakukan non-OWNER
 - 404 jika kode invite tidak ditemukan → "Kode undangan tidak valid"
@@ -770,11 +827,13 @@ export interface TripInvitePreview {
 ### 3.7 Dependencies & Environment
 
 **Environment Variables:**
+
 ```
 NEXT_PUBLIC_APP_URL   # untuk membentuk link invite & isi QR
 ```
 
 **Dependency baru (sudah dikonfirmasi):**
+
 - `qrcode.react` — komponen React siap pakai untuk render QR di client (dipilih). Install saat tahap implementasi dimulai.
 
 ### 3.8 Acceptance Criteria MVP
@@ -798,41 +857,51 @@ NEXT_PUBLIC_APP_URL   # untuk membentuk link invite & isi QR
 - [ ] Loading & error state konsisten
 
 > Catatan implementasi (disederhanakan, anti over-engineering):
+>
 > - Halaman `/join/[code]` dibuat sebagai **Server Component** yang memanggil service `getTripByInviteCode` **langsung**, sehingga endpoint `GET /api/trips/invite/[code]` dan client-fetch preview **tidak dibuat** (tidak diperlukan).
 > - Mengikuti pola hook yang sudah ada (`useState`/`useTransition` + `router.refresh()`), **bukan** React Query (project belum memakai React Query provider).
 > - Panel invite dikonsolidasi jadi **satu komponen** `TripInvitePanel` (kode, copy, link, QR, share, regenerate) — tidak dipecah menjadi banyak file kecil.
 > - Trip `ARCHIVED` tetap bisa di-preview tapi tombol gabung dinonaktifkan di UI (tidak pakai error 409 / error class baru).
 
 **Types & Schema:**
+
 - [x] Tambah `TripInvitePreview` di `src/types/trip.ts`
 
 **Service Layer:**
+
 - [x] `regenerateInviteCode` (assert OWNER + `generateInviteCode` + update)
 - [x] `getTripByInviteCode` (preview ringkas + cek `isAlreadyMember`)
 
 **API Routes:**
+
 - [x] `POST /api/trips/[id]/invite` (regenerate, OWNER only)
 - [~] ~~`GET /api/trips/invite/[code]`~~ — tidak dibuat, preview dipanggil langsung dari Server Component
 
 **Client Fetch (`src/lib/api/trip`):**
+
 - [x] `regenerateInvite.ts`
 - [~] ~~`getTripByInviteCode.ts`~~ — tidak diperlukan (Server Component akses service langsung)
 
 **UI Pages:**
+
 - [x] `/join/[code]` preview page (Server Component)
 - [x] Sisipkan `TripInvitePanel` di `/trips/[id]` (OWNER only)
 
 **Components:**
+
 - [x] `TripInvitePanel` (gabungan: kode + copy + link + QR + share + regenerate)
 
 **Hooks:**
+
 - [x] `useRegenerateInvite` (pola `router.refresh()`)
 
 **Setup:**
+
 - [x] Install `qrcode.react`
 - [ ] Pastikan `NEXT_PUBLIC_APP_URL` ter-set di `.env.local` (cek environment)
 
 **QA (manual, belum dijalankan):**
+
 - [ ] Test copy kode & copy link
 - [ ] Test QR mengarah ke link yang benar
 - [ ] Test regenerate (kode lama jadi invalid)
@@ -845,7 +914,7 @@ NEXT_PUBLIC_APP_URL   # untuk membentuk link invite & isi QR
 
 ### 3.10 Status
 
-**Current status:** Selesai — sisi mengundang & preview siap; eksekusi *join* ditangani fitur [Join Trip](#4-join-trip-user--guest-mvp)
+**Current status:** Selesai — sisi mengundang & preview siap; eksekusi _join_ ditangani fitur [Join Trip](#4-join-trip-user--guest-mvp)
 **Target selesai:** TBD
 **Catatan:** Bergantung pada [Create Trip](#2-create-trip--room-mvp) (butuh `inviteCode` & detail trip). Tombol "Gabung" kini aktif via fitur Join Trip.
 
@@ -854,11 +923,13 @@ NEXT_PUBLIC_APP_URL   # untuk membentuk link invite & isi QR
 ## 4. Join Trip (User & Guest) (MVP)
 
 ### 4.1 Tujuan
+
 Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik sebagai **user terdaftar** (sudah/akan login) maupun sebagai **tamu (guest)** tanpa membuat akun terlebih dahulu — cukup mengisi nama.
 
 ### 4.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Halaman join **publik** `/join/[code]` (dapat diakses tanpa login)
 - Join sebagai **user login**: satu klik "Gabung ke trip" → otomatis menjadi member → diarahkan ke `/trips/[id]`
 - Join sebagai **guest**: isi nama → menjadi member tanpa akun, identitas disimpan via cookie `tripuy_guest_id`
@@ -866,22 +937,26 @@ Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik seba
 - State preview untuk: sudah jadi member, trip diarsipkan, kode tidak valid
 
 **Tidak termasuk (kelak):**
+
 - Dashboard trip penuh untuk guest (saat ini guest hanya melihat konfirmasi "sudah gabung")
 - Approval OWNER sebelum member masuk
 - Konversi guest → akun (migrasi membership saat guest mendaftar)
 
 ### 4.3 Perubahan Data
+
 - `TripMember.userId` → **nullable** (null untuk guest)
 - Tambah `TripMember.guestId` (nilai cookie guest) & `TripMember.guestName`
 - Unique baru `@@unique([tripId, guestId])` untuk dedup guest per trip
 - Migrasi: `add_guest_member` (additive, non-destruktif)
 
 ### 4.4 Endpoint
-| Method | Path | Akses | Keterangan |
-| --- | --- | --- | --- |
-| POST | `/api/trips/join` | Publik | Join sebagai user (jika ada sesi) atau guest (butuh `guestName`); set cookie guest bila perlu |
+
+| Method | Path              | Akses  | Keterangan                                                                                    |
+| ------ | ----------------- | ------ | --------------------------------------------------------------------------------------------- |
+| POST   | `/api/trips/join` | Publik | Join sebagai user (jika ada sesi) atau guest (butuh `guestName`); set cookie guest bila perlu |
 
 ### 4.5 Struktur File
+
 - `app/join/[code]/page.tsx` — Server Component preview (publik)
 - `features/trip/components/JoinTripPanel.tsx` — area aksi join (user/guest/sudah-member/archived)
 - `features/trip/services/joinTrip.ts` — logika join idempotent
@@ -891,6 +966,7 @@ Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik seba
 - `lib/auth/guestSession.ts` — baca cookie `tripuy_guest_id`
 
 ### 4.6 QA (manual, belum dijalankan)
+
 - [ ] Join sebagai user login → jadi member → redirect ke trip
 - [ ] Join sebagai guest (isi nama) → jadi member → konfirmasi
 - [ ] Buka ulang link sebagai guest → dikenali, tidak duplikat
@@ -899,6 +975,7 @@ Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik seba
 - [ ] Dark mode & layout mobile panel join
 
 ### 4.7 Status
+
 **Current status:** Selesai (implementasi); QA manual menunggu
 **Catatan:** Bergantung pada [Invite Member](#3-invite-member-via-kode--qr-mvp) (preview-by-code) & [Create Trip](#2-create-trip--room-mvp).
 
@@ -907,6 +984,7 @@ Memungkinkan orang yang menerima undangan untuk **bergabung ke trip**, baik seba
 ## 5. Add Expense (MVP)
 
 ### 5.1 Tujuan
+
 Memungkinkan member trip (user terdaftar maupun guest) untuk **mencatat pengeluaran** di dalam sebuah trip: siapa yang membayar, berapa nominalnya, untuk apa, dan kapan. Fitur ini menjadi sumber data utama bagi perhitungan pembagian biaya, balance, dan settlement di iterasi berikutnya.
 
 > Catatan ruang lingkup: fitur ini fokus pada **pencatatan pengeluaran (CRUD expense)** dan **pemilihan peserta yang menanggung** dengan pembagian **rata (equal split)** sebagai default. Logika pembagian lanjutan (persentase, nominal custom, share tidak rata) didetailkan pada fitur terpisah [Split Expense Logic](#fitur-berikutnya). Perhitungan balance & settlement juga fitur terpisah — di sini hanya menyimpan data mentah pengeluaran beserta share-nya.
@@ -914,6 +992,7 @@ Memungkinkan member trip (user terdaftar maupun guest) untuk **mencatat pengelua
 ### 5.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Member trip dapat menambah expense baru di dalam trip yang aktif
 - Form input: judul/deskripsi, nominal, tanggal, pembayar (`paidBy`), peserta yang menanggung (`participants`), kategori (opsional), catatan (opsional)
 - Pembayar dipilih dari daftar **member trip** (mendukung user & guest)
@@ -927,6 +1006,7 @@ Memungkinkan member trip (user terdaftar maupun guest) untuk **mencatat pengelua
 - Nominal disimpan sebagai **integer minor unit** (hindari float) dengan currency mengikuti `Trip.currency`
 
 **Tidak termasuk MVP (future):**
+
 - Split tidak rata / custom (persentase, nominal per orang, weight) → [Split Expense Logic](#fitur-berikutnya)
 - Perhitungan balance & settlement → fitur terpisah
 - Upload struk / receipt (Receipt upload)
@@ -990,6 +1070,7 @@ enum ExpenseCategory {
 ```
 
 **Catatan:**
+
 - `paidBy`, `createdBy`, dan `share.member` mengacu ke `TripMember` (bukan `User`) agar **guest** bisa membayar / menanggung expense.
 - Relasi balik perlu ditambahkan di `TripMember` (`expensesPaid`, `expensesCreated`, `shares`) dan di `Trip` (`expenses`).
 - `amount` disimpan sebagai `Int` minor unit untuk menghindari masalah pembulatan float; pembagian rata menangani sisa pembagian (lihat 5.6).
@@ -998,18 +1079,19 @@ enum ExpenseCategory {
 
 ### 5.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
-| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section daftar expense + tombol "Tambah Pengeluaran" |
-| `/trips/[id]/expenses/new` | Protected | Member only | Form tambah expense |
-| `/trips/[id]/expenses/[expenseId]` | Protected | Member only | Detail expense |
-| `/trips/[id]/expenses/[expenseId]/edit` | Protected | Pembuat / OWNER | Form edit expense |
-| `/api/trips/[id]/expenses` | API | Member only | `GET` list, `POST` create |
-| `/api/trips/[id]/expenses/[expenseId]` | API | Member only (mutasi: pembuat/OWNER) | `GET`, `PATCH`, `DELETE` |
+| Route                                   | Tipe      | Akses                               | Deskripsi                                                                      |
+| --------------------------------------- | --------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| `/trips/[id]`                           | Protected | Member only                         | Detail trip — menampilkan section daftar expense + tombol "Tambah Pengeluaran" |
+| `/trips/[id]/expenses/new`              | Protected | Member only                         | Form tambah expense                                                            |
+| `/trips/[id]/expenses/[expenseId]`      | Protected | Member only                         | Detail expense                                                                 |
+| `/trips/[id]/expenses/[expenseId]/edit` | Protected | Pembuat / OWNER                     | Form edit expense                                                              |
+| `/api/trips/[id]/expenses`              | API       | Member only                         | `GET` list, `POST` create                                                      |
+| `/api/trips/[id]/expenses/[expenseId]`  | API       | Member only (mutasi: pembuat/OWNER) | `GET`, `PATCH`, `DELETE`                                                       |
 
 ### 5.5 User Flow
 
 #### A. Flow Tambah Expense
+
 1. Member membuka `/trips/[id]`, pada section "Pengeluaran" klik "Tambah Pengeluaran"
 2. Redirect ke `/trips/[id]/expenses/new`
 3. Form menampilkan: judul, nominal, tanggal (default hari ini), pembayar (dropdown member trip, default member saat ini), peserta (multi-select member, default semua tercentang), kategori (default OTHER), catatan (opsional)
@@ -1023,24 +1105,28 @@ enum ExpenseCategory {
 7. Sukses → redirect ke detail trip / detail expense + toast "Pengeluaran ditambahkan"
 
 #### B. Flow List Expense (di detail trip)
+
 1. Server Component detail trip memanggil service `getExpensesByTripId(tripId)`
 2. Tampilkan card list (mobile-first): judul, nominal terformat, nama pembayar, tanggal, kategori badge, jumlah peserta
 3. Order berdasar `date DESC` lalu `createdAt DESC`
 4. Empty state jika belum ada expense → CTA "Tambah Pengeluaran"
 
 #### C. Flow Detail Expense
+
 1. User klik card expense → `/trips/[id]/expenses/[expenseId]`
 2. Server Component fetch `getExpenseById(expenseId, tripId)` + assert member
 3. Tampilkan: judul, nominal, tanggal, kategori, catatan, pembayar, daftar peserta beserta share masing-masing
 4. Tombol Edit & Hapus muncul kondisional (pembuat expense atau OWNER trip)
 
 #### D. Flow Edit Expense
+
 1. Pembuat / OWNER klik "Edit" → `/trips/[id]/expenses/[expenseId]/edit`
 2. Form prefilled → submit `PATCH /api/trips/[id]/expenses/[expenseId]`
 3. Server: assert member + cek pembuat/OWNER → recalculate share → update dalam transaction (hapus share lama, buat ulang)
 4. Redirect balik + toast sukses
 
 #### E. Flow Delete Expense
+
 1. Pembuat / OWNER klik "Hapus" → konfirmasi (bottom sheet di mobile)
 2. Confirm → `DELETE /api/trips/[id]/expenses/[expenseId]`
 3. Server: assert member + cek pembuat/OWNER → hapus expense (cascade hapus share)
@@ -1049,6 +1135,7 @@ enum ExpenseCategory {
 ### 5.6 Technical Flow
 
 **Stack:**
+
 - Server Component untuk list & detail (initial fetch via service langsung)
 - Client Component untuk form (interaction)
 - Hook pola **`useState`/`useTransition` + `router.refresh()`** (mengikuti pola existing, project belum memakai React Query)
@@ -1057,10 +1144,12 @@ enum ExpenseCategory {
 - Reuse `requireSessionUser`, `assertTripMember`, format response `ok/created/fail/handleApiError`, dan error class `TripForbiddenError`/`TripNotFoundError`
 
 **Equal split (helper `calculateEqualShares`):**
+
 - Bagi `amount` rata ke `n` peserta: `base = Math.floor(amount / n)`
 - Sisa `remainder = amount - base * n` dibagikan +1 ke `remainder` peserta pertama (deterministik), sehingga `sum(shares) === amount` (tidak ada rupiah hilang/lebih)
 
 **Struktur file:**
+
 ```
 src/
   app/
@@ -1117,6 +1206,7 @@ src/
 ```
 
 **Tambahan tipe (`src/types/expense.ts`):**
+
 ```
 export type ExpenseCategory =
   | "FOOD" | "TRANSPORT" | "LODGING" | "ACTIVITY" | "SHOPPING" | "OTHER";
@@ -1166,16 +1256,19 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 ```
 
 **Validation (Zod):**
+
 - `createExpenseSchema`: title (min 1, max 100), amount (int positif, > 0), date (coerce date), category (enum, default OTHER), note (max 500, optional), paidById (string non-empty), participantIds (array string, min 1)
 - `updateExpenseSchema`: partial dari create
 
 **Authorization rules:**
+
 - Semua endpoint cek session + `assertTripMember` (akses minimal = member trip)
 - `paidById` & semua `participantIds` divalidasi sebagai member trip yang sama (tolak jika ada yang bukan member)
 - `PATCH` / `DELETE`: `assertExpenseEditable` → boleh jika `createdById` = member saat ini **atau** role member saat ini = OWNER
 - Tolak create/edit jika trip `ARCHIVED`
 
 **Error handling:**
+
 - 401 belum login
 - 403 bukan pembuat / bukan OWNER saat edit/hapus → "Anda tidak dapat mengubah pengeluaran ini"
 - 404 expense / trip tidak ditemukan atau bukan member
@@ -1184,6 +1277,7 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 - Jangan expose raw error database
 
 ### 5.7 Dependencies & Environment
+
 - **Tidak ada dependency baru** dan **tidak ada environment variable baru** untuk MVP ini.
 - Formatting nominal memakai `Intl.NumberFormat` (native) sesuai `currency` trip — disimpan sebagai helper di `src/lib/utils.ts` jika belum ada.
 
@@ -1211,15 +1305,18 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 ### 5.9 Checklist Implementasi
 
 **Database:**
+
 - [ ] Tambah model `Expense`, `ExpenseShare`, enum `ExpenseCategory` (mis. `prisma/schema/expense.prisma`)
 - [ ] Tambah relasi balik di `Trip` (`expenses`) & `TripMember` (`expensesPaid`, `expensesCreated`, `shares`)
 - [ ] Run migration `add_expense` (additive)
 
 **Types & Schema:**
+
 - [ ] Buat `src/types/expense.ts`
 - [ ] Buat `createExpenseSchema`, `updateExpenseSchema` (Zod)
 
 **Service Layer:**
+
 - [ ] `calculateEqualShares` (helper, remainder deterministik)
 - [ ] `createExpense` (transaction Expense + ExpenseShare, validasi member)
 - [ ] `getExpensesByTripId` (list item + nama pembayar + jumlah peserta)
@@ -1229,6 +1326,7 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 - [ ] `assertExpenseEditable` (pembuat / OWNER)
 
 **API Routes:**
+
 - [ ] `GET /api/trips/[id]/expenses`
 - [ ] `POST /api/trips/[id]/expenses`
 - [ ] `GET /api/trips/[id]/expenses/[expenseId]`
@@ -1236,18 +1334,21 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 - [ ] `DELETE /api/trips/[id]/expenses/[expenseId]`
 
 **Client Fetch (`src/lib/api/expense`):**
+
 - [ ] `createExpense.ts`
 - [ ] `getExpenses.ts`
 - [ ] `updateExpense.ts`
 - [ ] `deleteExpense.ts`
 
 **UI Pages:**
+
 - [ ] `/trips/[id]/expenses/new`
 - [ ] `/trips/[id]/expenses/[expenseId]`
 - [ ] `/trips/[id]/expenses/[expenseId]/edit`
 - [ ] Sisipkan `ExpenseSection` di `/trips/[id]`
 
 **Components:**
+
 - [ ] `ExpenseSection`, `ExpenseList`, `ExpenseCard`
 - [ ] `ExpenseForm` (reusable create + edit)
 - [ ] `ExpenseDetail`
@@ -1256,9 +1357,11 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 - [ ] `DeleteExpenseDialog`
 
 **Hooks:**
+
 - [ ] `useCreateExpense`, `useUpdateExpense`, `useDeleteExpense` (pola `router.refresh()`)
 
 **QA (manual):**
+
 - [ ] Test tambah expense sukses + equal split benar (cek sisa pembagian)
 - [ ] Test tambah dengan validation error (nominal 0, peserta kosong)
 - [ ] Test pembayar/peserta guest
@@ -1280,6 +1383,7 @@ export type UpdateExpenseInput = Partial<CreateExpenseInput>;
 ## 6. Group Member (MVP)
 
 ### 6.1 Tujuan
+
 Memungkinkan OWNER mengelompokkan beberapa member trip (mis. pasangan, keluarga, atau orang yang berbagi dompet) menjadi satu **unit pembayaran patungan**. Saat pembagian biaya, satu grup dihitung sebagai **satu peserta** dan tagihannya menjadi **tanggungan bersama** grup, sehingga anggota dalam satu grup tidak saling berutang dan diperlakukan sebagai satu pihak dalam balance & settlement.
 
 > Catatan ruang lingkup: fitur ini fokus pada **pembentukan & pengelolaan grup** (CRUD grup, menambah/mengeluarkan anggota) dan **mendefinisikan kontrak** bagaimana grup diperlakukan sebagai satu unit. **Konsumsi** kontrak ini — yaitu perhitungan equal split berbasis unit dan agregasi balance per grup — diimplementasikan pada fitur terpisah [Split Expense Logic](#fitur-berikutnya) dan Balance Calculation. Fitur ini hanya menyediakan data grup dan aturannya.
@@ -1287,6 +1391,7 @@ Memungkinkan OWNER mengelompokkan beberapa member trip (mis. pasangan, keluarga,
 ### 6.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - OWNER dapat membuat grup baru di dalam sebuah trip (nama wajib, warna/label opsional untuk badge)
 - OWNER dapat menambah & mengeluarkan member trip (user maupun guest) dari grup
 - OWNER dapat mengganti nama grup
@@ -1297,6 +1402,7 @@ Memungkinkan OWNER mengelompokkan beberapa member trip (mis. pasangan, keluarga,
 - Kontrak split & balance terdefinisi: grup = 1 unit peserta; anggota se-grup tidak saling berutang; balance/settlement direpresentasikan per grup/individual
 
 **Tidak termasuk MVP (future):**
+
 - Perhitungan equal split berbasis unit grup → [Split Expense Logic](#fitur-berikutnya)
 - Agregasi balance & settlement per grup → fitur Balance/Settlement
 - Member tergabung di lebih dari satu grup
@@ -1328,6 +1434,7 @@ model MemberGroup {
 ```
 
 Perubahan pada `TripMember` (additive):
+
 ```
 model TripMember {
   ...
@@ -1339,6 +1446,7 @@ model TripMember {
 ```
 
 **Catatan:**
+
 - `groupId` **nullable** → null berarti member berdiri sendiri sebagai unit individual.
 - `onDelete: SetNull` pada relasi grup → menghapus grup hanya melepas anggota (groupId di-null-kan), tidak menghapus member maupun expense lama.
 - `onDelete: Cascade` dari `Trip` → grup ikut terhapus saat trip dihapus.
@@ -1348,18 +1456,19 @@ model TripMember {
 
 ### 6.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
-| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan daftar grup + badge grup pada daftar member |
-| `/trips/[id]/groups` | Protected | OWNER only | Halaman kelola grup (buat, ubah, hapus, atur anggota) |
-| `/api/trips/[id]/groups` | API | Member (GET) / OWNER (POST) | `GET` list grup, `POST` buat grup |
-| `/api/trips/[id]/groups/[groupId]` | API | OWNER only | `PATCH` ubah nama / set anggota, `DELETE` hapus grup |
+| Route                              | Tipe      | Akses                       | Deskripsi                                                             |
+| ---------------------------------- | --------- | --------------------------- | --------------------------------------------------------------------- |
+| `/trips/[id]`                      | Protected | Member only                 | Detail trip — menampilkan daftar grup + badge grup pada daftar member |
+| `/trips/[id]/groups`               | Protected | OWNER only                  | Halaman kelola grup (buat, ubah, hapus, atur anggota)                 |
+| `/api/trips/[id]/groups`           | API       | Member (GET) / OWNER (POST) | `GET` list grup, `POST` buat grup                                     |
+| `/api/trips/[id]/groups/[groupId]` | API       | OWNER only                  | `PATCH` ubah nama / set anggota, `DELETE` hapus grup                  |
 
 > Catatan: pengelolaan keanggotaan dilakukan via `PATCH` grup dengan mengirim daftar `memberIds` lengkap (server menyelaraskan: melepas anggota yang dihapus, memasang anggota baru) agar idempotent dan menghindari endpoint mikro berlebihan.
 
 ### 6.5 User Flow
 
 #### A. Flow Buat Grup (OWNER)
+
 1. OWNER membuka `/trips/[id]/groups` (atau panel "Kelola Grup" di detail trip)
 2. Klik "Buat Grup" → isi nama grup (wajib), pilih warna (opsional), centang member yang akan masuk grup
 3. Client-side: validasi Zod (nama min 1, max 40; member opsional)
@@ -1368,6 +1477,7 @@ model TripMember {
 6. Sukses → refresh data + toast "Grup dibuat"
 
 #### B. Flow Atur Anggota Grup (OWNER)
+
 1. OWNER memilih sebuah grup → "Atur Anggota"
 2. Menampilkan daftar member trip dengan status grup masing-masing (member yang sudah di grup lain ditandai)
 3. OWNER mencentang/menghapus member → submit `PATCH /api/trips/[id]/groups/[groupId]` dengan `memberIds` final
@@ -1375,16 +1485,19 @@ model TripMember {
 5. Refresh data + toast "Anggota grup diperbarui"
 
 #### C. Flow Ubah Nama Grup (OWNER)
+
 1. OWNER klik "Ubah Nama" → edit nama/warna → `PATCH /api/trips/[id]/groups/[groupId]`
 2. Refresh data + toast sukses
 
 #### D. Flow Hapus Grup (OWNER)
+
 1. OWNER klik "Hapus Grup" → konfirmasi (bottom sheet di mobile): "Anggota akan kembali menjadi individual"
 2. Confirm → `DELETE /api/trips/[id]/groups/[groupId]`
 3. Server: assert OWNER → hapus grup (anggota di-`SetNull`, tetap menjadi member trip)
 4. Refresh data + toast "Grup dihapus"
 
 #### E. Flow Lihat Grup (semua member)
+
 1. Member membuka `/trips/[id]`
 2. Daftar member menampilkan badge grup (nama/warna) bagi yang tergabung
 3. Section grup menampilkan tiap grup beserta anggotanya; member non-grup ditampilkan sebagai individual
@@ -1392,6 +1505,7 @@ model TripMember {
 ### 6.6 Technical Flow
 
 **Stack:**
+
 - Server Component untuk list grup & halaman kelola (initial fetch via service langsung)
 - Client Component untuk form/aksi (buat, atur anggota, ubah nama, hapus)
 - Hook pola **`useState`/`useTransition` + `router.refresh()`** (mengikuti pola existing, project belum memakai React Query)
@@ -1400,12 +1514,14 @@ model TripMember {
 - Reuse `requireSessionUser`, `assertTripAccess`/`assertTripMember`, format response `ok/created/fail/handleApiError`, error class `TripForbiddenError`/`TripNotFoundError`
 
 **Kontrak untuk Split & Balance (didefinisikan di sini, dikonsumsi fitur lain):**
+
 - **Unit peserta** dalam equal split = jumlah member individual yang menjadi peserta + jumlah grup yang punya ≥1 anggota peserta. Setiap unit mendapat 1 bagian; sisa pembagian mengikuti aturan deterministik `calculateEqualShares`.
 - Bagian sebuah grup adalah **tanggungan bersama** grup — anggota di dalam satu grup **tidak saling berutang**.
 - Balance & settlement memperlakukan grup sebagai **satu pihak** (utang/piutang grup direpresentasikan atas nama grup), member non-grup sebagai pihak individual.
 - Balance dihitung **on-the-fly** dari data expense + komposisi grup terkini, sehingga perubahan grup langsung tercermin tanpa memigrasi data expense lama.
 
 **Struktur file (diusulkan):**
+
 ```
 src/
   app/
@@ -1455,6 +1571,7 @@ src/
 ```
 
 **Tambahan tipe (`src/types/group.ts`):**
+
 ```
 export interface MemberGroup {
   id: string;
@@ -1485,16 +1602,19 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 ```
 
 **Validation (Zod):**
+
 - `createGroupSchema`: name (min 1, max 40), color (string opsional), memberIds (array string, default `[]`)
 - `updateGroupSchema`: partial dari create
 
 **Authorization rules:**
+
 - `GET /api/trips/[id]/groups`: wajib login + `assertTripMember`
 - `POST` / `PATCH` / `DELETE`: wajib login + assert **OWNER** trip
 - Semua `memberIds` divalidasi sebagai `TripMember` dari trip yang sama
 - Memindahkan member yang sudah ada di grup lain → otomatis dilepas dari grup lama (bukan error)
 
 **Error handling:**
+
 - 401 belum login
 - 403 aksi kelola oleh non-OWNER → "Hanya pemilik trip yang dapat mengelola grup"
 - 404 grup / trip tidak ditemukan atau bukan member
@@ -1502,6 +1622,7 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 - Jangan expose raw error database
 
 ### 6.7 Dependencies & Environment
+
 - **Tidak ada dependency baru** dan **tidak ada environment variable baru** untuk MVP ini.
 
 ### 6.8 Acceptance Criteria MVP
@@ -1526,16 +1647,19 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 ### 6.9 Checklist Implementasi
 
 **Database:**
+
 - [ ] Tambah model `MemberGroup` (mis. `prisma/schema/group.prisma`)
 - [ ] Tambah `groupId` + relasi `group` (opsional, `onDelete: SetNull`) di `TripMember`
 - [ ] Tambah relasi balik `members` di `MemberGroup` & `groups` di `Trip` (jika diperlukan)
 - [ ] Run migration `add_member_group` (additive)
 
 **Types & Schema:**
+
 - [ ] Buat `src/types/group.ts`
 - [ ] Buat `createGroupSchema`, `updateGroupSchema` (Zod)
 
 **Service Layer:**
+
 - [ ] `createGroup` (transaction: buat grup + set groupId anggota, validasi member)
 - [ ] `getGroupsByTripId` (grup + anggota + displayName)
 - [ ] `updateGroup` (ubah nama/warna + sinkron anggota dalam transaction)
@@ -1543,22 +1667,26 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 - [ ] Helper assert OWNER (reuse existing bila ada)
 
 **API Routes:**
+
 - [ ] `GET /api/trips/[id]/groups`
 - [ ] `POST /api/trips/[id]/groups`
 - [ ] `PATCH /api/trips/[id]/groups/[groupId]`
 - [ ] `DELETE /api/trips/[id]/groups/[groupId]`
 
 **Client Fetch (`src/lib/api/group`):**
+
 - [ ] `createGroup.ts`
 - [ ] `getGroups.ts`
 - [ ] `updateGroup.ts`
 - [ ] `deleteGroup.ts`
 
 **UI Pages:**
+
 - [ ] `/trips/[id]/groups` (kelola grup, OWNER)
 - [ ] Sisipkan `GroupSection` + badge grup di `/trips/[id]`
 
 **Components:**
+
 - [ ] `GroupSection`, `GroupList`, `GroupCard`
 - [ ] `GroupForm` (reusable buat + ubah)
 - [ ] `GroupMemberPicker`
@@ -1566,9 +1694,11 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 - [ ] `DeleteGroupDialog`
 
 **Hooks:**
+
 - [ ] `useCreateGroup`, `useUpdateGroup`, `useDeleteGroup` (pola `router.refresh()`)
 
 **QA (manual):**
+
 - [ ] Test buat grup sukses + dengan anggota
 - [ ] Test buat grup dengan validation error (nama kosong, memberId invalid)
 - [ ] Test atur anggota (tambah, keluarkan, pindah dari grup lain)
@@ -1589,6 +1719,7 @@ export type UpdateGroupInput = Partial<CreateGroupInput>;
 ## 7. Split Expense Logic (MVP)
 
 ### 7.1 Tujuan
+
 Memperluas pencatatan pengeluaran agar pembagian biaya tidak hanya **rata (equal)**, tetapi juga mendukung **nominal pasti per peserta (exact)**, **persentase (percentage)**, dan **bobot/share (weight)**. Selain itu, fitur ini **mengkonsumsi kontrak grup** dari [Group Member](#6-group-member-mvp): satu grup dihitung sebagai **satu unit peserta**, sehingga pembagian terjadi di level unit (member individual + grup), bukan selalu per orang.
 
 > Catatan ruang lingkup: fitur ini fokus pada **cara membagi nominal sebuah expense** ke peserta/unit dan menyimpannya sebagai `ExpenseShare`. Perhitungan **balance** (siapa berutang ke siapa) dan **settlement** tetap fitur terpisah; fitur ini hanya menentukan besaran tanggungan tiap unit secara akurat (jumlah seluruh share selalu = nominal expense). Fitur ini **memperkaya** [Add Expense](#5-add-expense-mvp) yang sudah ada — bukan menggantinya — dengan menambah pilihan tipe pembagian pada form yang sama.
@@ -1596,6 +1727,7 @@ Memperluas pencatatan pengeluaran agar pembagian biaya tidak hanya **rata (equal
 ### 7.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Pemilihan **tipe pembagian** saat tambah / edit expense: `EQUAL`, `EXACT`, `PERCENTAGE`, `SHARE`
 - **EQUAL** — rata ke semua unit peserta (perilaku existing, kini berbasis unit)
 - **EXACT** — input nominal pasti per unit; jumlah input wajib **persis sama** dengan nominal expense
@@ -1608,6 +1740,7 @@ Memperluas pencatatan pengeluaran agar pembagian biaya tidak hanya **rata (equal
 - Validasi tipe pembagian di client & server (sum exact = amount, sum persen = 100%, bobot > 0, minimal 1 unit)
 
 **Tidak termasuk MVP (future):**
+
 - Perhitungan balance & settlement (fitur terpisah)
 - Pembagian internal di dalam grup (siapa di grup menanggung berapa) — grup tetap satu pihak
 - Menandai satu unit "tidak ikut" pada subset item dalam satu expense (item-level split / itemized)
@@ -1654,6 +1787,7 @@ model ExpenseShare {
 ```
 
 **Catatan:**
+
 - Tepat **satu** dari `memberId` / `groupId` terisi per baris share (di-validasi di service; Prisma tidak punya check constraint). `null` pada kolom unique di PostgreSQL dianggap distinct, sehingga `@@unique([expenseId, memberId])` & `@@unique([expenseId, groupId])` aman untuk baris campuran.
 - Arti `splitValue` mengikuti `splitType`:
   - `EXACT` → nominal pasti unit (minor unit), `amount === splitValue`
@@ -1668,17 +1802,18 @@ model ExpenseShare {
 
 **Tidak menambah halaman atau endpoint baru.** Fitur ini memperluas form & service expense yang sudah ada:
 
-| Route | Tipe | Akses | Perubahan |
-|---|---|---|---|
-| `/trips/[id]/expenses/new` | Protected | Member only | Form tambah: tambah pemilih `splitType` + input per unit |
-| `/trips/[id]/expenses/[expenseId]/edit` | Protected | Pembuat / OWNER | Form edit: prefill tipe & nilai dari `splitValue` |
-| `/trips/[id]/expenses/[expenseId]` | Protected | Member only | Detail: tampilkan ringkasan pembagian per unit (badge grup) |
-| `/api/trips/[id]/expenses` | API | Member only | `POST` create menerima `splitType` + `splits` |
-| `/api/trips/[id]/expenses/[expenseId]` | API | Member (mutasi: pembuat/OWNER) | `PATCH` menerima `splitType` + `splits` |
+| Route                                   | Tipe      | Akses                          | Perubahan                                                   |
+| --------------------------------------- | --------- | ------------------------------ | ----------------------------------------------------------- |
+| `/trips/[id]/expenses/new`              | Protected | Member only                    | Form tambah: tambah pemilih `splitType` + input per unit    |
+| `/trips/[id]/expenses/[expenseId]/edit` | Protected | Pembuat / OWNER                | Form edit: prefill tipe & nilai dari `splitValue`           |
+| `/trips/[id]/expenses/[expenseId]`      | Protected | Member only                    | Detail: tampilkan ringkasan pembagian per unit (badge grup) |
+| `/api/trips/[id]/expenses`              | API       | Member only                    | `POST` create menerima `splitType` + `splits`               |
+| `/api/trips/[id]/expenses/[expenseId]`  | API       | Member (mutasi: pembuat/OWNER) | `PATCH` menerima `splitType` + `splits`                     |
 
 ### 7.5 User Flow
 
 #### A. Flow Pilih Tipe Pembagian (tambah / edit)
+
 1. Pada `ExpenseForm`, setelah memilih peserta, user memilih **Tipe Pembagian**: Rata / Nominal / Persentase / Bobot (default **Rata**)
 2. Sistem menurunkan **daftar unit** dari peserta: member non-grup → unit individual; member yang berbagi grup → digabung jadi **satu unit grup** (tampil sebagai badge grup)
 3. Sesuai tipe:
@@ -1690,6 +1825,7 @@ model ExpenseShare {
 5. Submit → `POST`/`PATCH` dengan `{ splitType, splits: [{ unit, value? }] }`
 
 #### B. Flow Server Menghitung & Menyimpan
+
 1. Cek auth + `assertTripMember`; untuk edit, `assertExpenseEditable`; tolak bila trip `ARCHIVED` (409)
 2. Validasi: `paidById` & semua unit valid untuk trip ini; tiap unit grup adalah grup milik trip yang sama; tepat satu dari member/grup per unit
 3. Validasi agregat per tipe (sum exact = amount, sum persen = 10000 bp, bobot > 0)
@@ -1698,6 +1834,7 @@ model ExpenseShare {
 6. Sukses → redirect/refresh + toast
 
 #### C. Flow Lihat Pembagian (detail expense)
+
 1. Detail expense menampilkan tiap unit: nama member / **badge grup** (beserta anggota), nominal tanggungan, dan label tipe (mis. "30%", "bobot 2", "nominal")
 2. Grup ditampilkan sebagai satu baris (satu pihak); anggota grup tidak ditampilkan saling berutang
 
@@ -1706,11 +1843,13 @@ model ExpenseShare {
 **Stack:** mengikuti [Add Expense](#5-add-expense-mvp) — Server Component untuk detail, Client Component `ExpenseForm`, pola `useState`/`useTransition` + `router.refresh()`, Zod client+server, Prisma transaction, reuse `requireSessionUser`/`assertTripMember`/`assertExpenseEditable` & format response `ok/created/fail/handleApiError`.
 
 **Helper inti — `calculateShares` (generalisasi `calculateEqualShares`):**
+
 ```
 type SplitUnit = { key: string; type: "member" | "group"; refId: string; value?: number };
 
 calculateShares(amount: number, splitType: SplitType, units: SplitUnit[]): { unit: SplitUnit; amount: number }[]
 ```
+
 - `EQUAL`: `base = floor(amount / n)`, `remainder = amount - base*n` dibagikan +1 ke `remainder` unit pertama (deterministik) → reuse logika `calculateEqualShares` existing
 - `EXACT`: `amount` unit = `value` (sudah divalidasi `sum === amount`)
 - `PERCENTAGE`: `raw = amount * bp / 10000`, bagikan sisa pembulatan (`amount - sum(floor)`) +1 ke unit dengan pecahan terbesar (largest remainder) → `sum === amount`
@@ -1718,14 +1857,17 @@ calculateShares(amount: number, splitType: SplitType, units: SplitUnit[]): { uni
 - Invarian wajib untuk semua tipe: `sum(shares) === amount` dan tidak ada share negatif
 
 **Helper turunan unit — `resolveSplitUnits`:**
+
 ```
 resolveSplitUnits(participants: TripMemberLite[]): SplitUnit[]
 ```
+
 - Member tanpa `groupId` → 1 unit `member`
 - Member dengan `groupId` sama → digabung jadi 1 unit `group` (dedup per `groupId`)
 - Dipakai server saat menyiapkan unit; client memakai turunan yang sama agar preview konsisten
 
 **Struktur file (penambahan pada feature `expense` yang sudah ada):**
+
 ```
 src/
   features/
@@ -1749,6 +1891,7 @@ src/
 ```
 
 **Tambahan tipe (`src/types/expense.ts`):**
+
 ```
 export type SplitType = "EQUAL" | "EXACT" | "PERCENTAGE" | "SHARE";
 
@@ -1768,6 +1911,7 @@ export interface ExpenseShareUnit {
 ```
 
 **Validation (Zod) — `expenseSchema` diperluas:**
+
 - Tambah `splitType` (enum) & `splits` (array `SplitInput`, min 1)
 - `superRefine` per tipe:
   - `EXACT`: tiap `value` ≥ 0 integer; `sum(value) === amount`
@@ -1779,6 +1923,7 @@ export interface ExpenseShareUnit {
 **Authorization rules:** identik [Add Expense](#5-add-expense-mvp) — member untuk akses, pembuat/OWNER untuk mutasi, tolak trip `ARCHIVED`.
 
 **Error handling:**
+
 - 422 bila agregat tidak valid: "Total nominal harus sama dengan jumlah pengeluaran" / "Total persentase harus 100%" / "Bobot harus lebih dari 0"
 - 422 bila unit (member/grup) bukan milik trip
 - 409 trip diarsipkan
@@ -1786,6 +1931,7 @@ export interface ExpenseShareUnit {
 - Jangan expose raw error database
 
 ### 7.7 Dependencies & Environment
+
 - **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
 - Formatting nominal & persen memakai `Intl.NumberFormat` (native) sesuai `Trip.currency`.
 
@@ -1812,16 +1958,19 @@ export interface ExpenseShareUnit {
 ### 7.9 Checklist Implementasi
 
 **Database:**
+
 - [x] Tambah `Expense.splitType` + enum `SplitType`
 - [x] Ubah `ExpenseShare.memberId` jadi nullable + tambah `groupId`, `splitValue`
 - [x] Tambah relasi balik `shares` di `MemberGroup` (`onDelete: Cascade`)
 - [~] Migration `add_split_type` ditulis — perlu dijalankan (`pnpm db:migrate` / `prisma migrate deploy`)
 
 **Types & Schema:**
+
 - [x] Perluas `src/types/expense.ts` (`SplitType`, `SplitInput`, `ExpenseShareUnit`, `ExpenseUnitOption`)
 - [x] Perluas `expenseSchema` (splitType + splits + `superRefine` agregat)
 
 **Service Layer:**
+
 - [x] `calculateShares` (semua tipe, largest-remainder, invarian `sum === amount`)
 - [x] `prepareExpenseShares` (validasi unit member/grup + build share rows) — menggantikan `resolveSplitUnits`; collapse grup dilakukan di `getExpenseFormContext`
 - [x] Perluas `createExpense` (terima splitType + splits, validasi unit)
@@ -1830,15 +1979,18 @@ export interface ExpenseShareUnit {
 - [x] Perluas `getExpenseFormContext` (turunkan `units` = member non-grup + grup)
 
 **API Routes:**
+
 - [x] Perluas `POST /api/trips/[id]/expenses` (splitType + splits — via schema)
 - [x] Perluas `PATCH /api/trips/[id]/expenses/[expenseId]`
 
 **Components:**
+
 - [x] `SplitTypeSelector`
 - [x] `SplitInputList` (input per unit + indikator sisa/total/preview, termasuk ringkasan)
 - [x] Perluas `ExpenseForm` & halaman detail expense (badge grup + nilai split)
 
 **QA (manual):**
+
 - [ ] Test EQUAL berbasis unit (dengan & tanpa grup) — sisa benar
 - [ ] Test EXACT (valid + total tidak cocok ditolak)
 - [ ] Test PERCENTAGE (valid 100% + bukan 100% ditolak)
@@ -1861,6 +2013,7 @@ export interface ExpenseShareUnit {
 ## 8. Balance Calculation (MVP)
 
 ### 8.1 Tujuan
+
 Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: berapa total yang sudah dibayar seseorang/grup, berapa total yang menjadi tanggungannya, dan **selisih bersihnya** — apakah ia masih harus membayar (berutang) atau berhak menerima kembali (berpiutang). Fitur ini menjadi jembatan antara pencatatan expense dan perhitungan settlement.
 
 > Catatan ruang lingkup: fitur ini fokus pada **agregasi saldo bersih per pihak** (siapa kelebihan/kekurangan bayar), **bukan** menentukan siapa transfer ke siapa. Rekomendasi transaksi pelunasan (minimisasi jumlah transfer) didetailkan pada fitur terpisah Settlement Calculation. Fitur ini **mengkonsumsi kontrak** dari [Group Member](#6-group-member-mvp) (grup = 1 pihak) & [Split Expense Logic](#7-split-expense-logic-mvp) (`ExpenseShare` per unit) dan **tidak mengubah** data expense apa pun — perhitungan murni **read-only & on-the-fly**.
@@ -1868,6 +2021,7 @@ Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: 
 ### 8.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Perhitungan saldo **on-the-fly** dari data `Expense` + `ExpenseShare` + komposisi grup terkini (tanpa menyimpan hasil / tanpa tabel baru)
 - Satuan perhitungan = **unit/pihak**: member individual (tanpa grup) + grup (sebagai satu pihak). Anggota se-grup **tidak saling berutang**
 - Per pihak dihitung: **total dibayar** (`paid`), **total ditanggung** (`owed`), dan **saldo bersih** (`balance = paid − owed`)
@@ -1880,6 +2034,7 @@ Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: 
 - Trip `ARCHIVED` tetap bisa dilihat saldonya (read-only)
 
 **Tidak termasuk MVP (future):**
+
 - Rekomendasi siapa-bayar-siapa & minimisasi transaksi → **Settlement Calculation**
 - Tandai lunas / catat pembayaran → **Settlement / Mark as Paid**
 - Rincian saldo per kategori / chart → **Trip Summary / Analytics**
@@ -1896,14 +2051,15 @@ Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: 
 - `TripMember.groupId` (komposisi grup terkini) & `MemberGroup`
 
 **Catatan:**
+
 - Karena murni dihitung ulang dari sumber data, perubahan grup (pindah/keluar grup) maupun edit expense **langsung tercermin** pada saldo tanpa migrasi data.
 - Resolusi pihak untuk **pembayar**: `paidBy` member → jika `member.groupId` ada, dikreditkan ke unit grup; jika tidak, ke unit member individual.
 - Resolusi pihak untuk **tanggungan**: `share.groupId` → unit grup; selain itu `share.memberId` → resolve ke unit grup bila member-nya kini bergrup, atau unit member individual.
 
 ### 8.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
+| Route         | Tipe      | Akses       | Deskripsi                                                                                   |
+| ------------- | --------- | ----------- | ------------------------------------------------------------------------------------------- |
 | `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section "Saldo" (daftar pihak + saldo bersih + total pengeluaran) |
 
 > Mengikuti pola yang sudah dipakai fitur sebelumnya (Server Component memanggil service langsung, project belum memakai React Query), **tidak dibuat endpoint API baru**. Section saldo dirender di Server Component detail trip via service `getTripBalances(tripId)`. Endpoint `GET /api/trips/[id]/balances` **opsional di masa depan** bila Settlement membutuhkan fetch client-side.
@@ -1911,6 +2067,7 @@ Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: 
 ### 8.5 User Flow
 
 #### A. Flow Lihat Saldo (semua member)
+
 1. Member membuka `/trips/[id]`
 2. Server Component memanggil `getTripBalances(tripId)` (setelah `assertTripMember`)
 3. Section "Saldo" menampilkan, untuk tiap pihak: nama member / **badge grup**, total dibayar, total ditanggung, dan **saldo bersih** dengan indikator visual:
@@ -1921,21 +2078,25 @@ Menghitung dan menampilkan **saldo (balance) tiap pihak** di dalam sebuah trip: 
 5. Urutan tampil: berpiutang terbesar di atas → berutang → impas (deterministik, tie-break by nama)
 
 #### B. Flow Empty / Zero State
+
 1. Belum ada expense → tampilkan empty state "Belum ada pengeluaran, saldo masih kosong" + CTA "Tambah Pengeluaran"
 2. Ada expense tapi semua impas (mis. semua bayar = tanggungan) → tampilkan info "Semua sudah impas"
 
 #### C. Flow Trip Diarsipkan
+
 1. Trip `ARCHIVED` → saldo tetap dihitung & ditampilkan (read-only), tanpa CTA tambah expense
 
 ### 8.6 Technical Flow
 
 **Stack:**
+
 - Server Component untuk render section saldo (initial fetch via service langsung)
 - Tanpa Client Component / hook mutation (read-only); interaktivitas minimal cukup Server Component
 - Reuse `requireSessionUser`, `assertTripMember`, error class `TripForbiddenError`/`TripNotFoundError`
 - **Tidak** ada Prisma write — hanya query baca
 
 **Helper inti — `calculateBalances` (pure, deterministik, mudah dites):**
+
 ```
 type BalanceMemberLite = { id: string; displayName: string; isGuest: boolean; groupId: string | null };
 type BalanceGroupLite  = { id: string; name: string; color: string | null };
@@ -1951,7 +2112,9 @@ calculateBalances(
   expenses: BalanceExpenseLite[],
 ): BalanceUnit[]
 ```
+
 Algoritma:
+
 1. **Bangun unit/pihak** dari komposisi terkini: tiap member tanpa `groupId` → unit `member`; tiap grup (yang punya ≥1 anggota) → unit `group` (kumpulkan `memberIds` anggotanya). Simpan peta `memberId → unitKey`.
 2. Inisialisasi tiap unit `{ paid: 0, owed: 0 }`.
 3. Untuk tiap expense:
@@ -1963,11 +2126,13 @@ Algoritma:
 **Invarian wajib (diuji):** `Σ paid === Σ owed`; `Σ balance === 0`; tidak ada pihak hilang dari hasil. Karena `Σ shares === amount` per expense (dijamin Split Expense Logic), invarian ini selalu terpenuhi.
 
 **Service — `getTripBalances(tripId)`:**
+
 - `assertTripMember` (pengakses harus member)
 - Query: members (+ user displayName / guestName, `groupId`), groups, expenses (+ shares) milik trip
 - Panggil `calculateBalances(...)` → kembalikan `TripBalanceSummary`
 
 **Struktur file (diusulkan — perlu konfirmasi pembuatan folder `features/balance`):**
+
 ```
 src/
   app/
@@ -1990,6 +2155,7 @@ src/
 ```
 
 **Tambahan tipe (`src/types/balance.ts`):**
+
 ```
 export interface BalanceUnit {
   type: "member" | "group";
@@ -2010,16 +2176,19 @@ export interface TripBalanceSummary {
 ```
 
 **Authorization rules:**
+
 - Akses saldo = **member trip** (`assertTripMember`). Tidak ada aksi mutasi → tidak ada cek OWNER.
 - Saldo tidak membocorkan data sensitif tambahan (hanya agregat dari data yang sudah boleh dilihat member).
 
 **Error handling:**
+
 - 401 belum login
 - 404 trip tidak ditemukan atau pengakses bukan member
 - Jangan expose raw error database
 - Bila ada anomali data (mis. share menunjuk member yang tak lagi ada di trip) → diperlakukan defensif (di-skip / dimasukkan unit "tidak diketahui") tanpa crash — dicatat sebagai edge case future
 
 ### 8.7 Dependencies & Environment
+
 - **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
 - Formatting nominal memakai helper currency existing (`Intl.NumberFormat` sesuai `Trip.currency`).
 
@@ -2045,21 +2214,26 @@ export interface TripBalanceSummary {
 ### 8.9 Checklist Implementasi
 
 **Database:**
+
 - [x] Tidak ada perubahan schema / migration (read-only)
 
 **Types:**
+
 - [x] Buat `src/types/balance.ts` (`BalanceUnit`, `TripBalanceSummary`)
 
 **Service Layer:**
+
 - [x] `calculateBalances` (helper pure: bangun unit, agregasi paid/owed, invarian `Σ balance === 0`)
 - [x] `getTripBalances` (assert member + query expense/share/grup + calculate)
 
 **UI:**
+
 - [x] Sisipkan `BalanceSection` di `/trips/[id]`
 - [x] `BalanceSection` (satu komponen: total + daftar pihak + paid/owed + saldo) — disederhanakan, tidak dipecah jadi `BalanceList`/`BalanceUnitRow`/`BalanceEmptyState` terpisah
 - [~] ~~`BalanceList`, `BalanceUnitRow`, `BalanceEmptyState`~~ — digabung ke `BalanceSection` (anti over-engineering)
 
 **QA (manual):**
+
 - [ ] Test saldo dasar (1 pembayar, beberapa peserta) — tanda & nominal benar
 - [ ] Test dengan grup (pembayar grup, tanggungan grup) — grup satu pihak
 - [ ] Test share lama `memberId` yang kini bergrup → collapse benar
@@ -2080,6 +2254,7 @@ export interface TripBalanceSummary {
 ## 9. Settlement Calculation (MVP)
 
 ### 9.1 Tujuan
+
 Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calculation-mvp)) menjadi **daftar transaksi pelunasan yang konkret**: siapa harus mentransfer ke siapa dan berapa, dengan **jumlah transaksi seminimal mungkin**. Tujuannya agar grup tahu langkah praktis untuk saling membayar dan menutup seluruh utang-piutang trip.
 
 > Catatan ruang lingkup: fitur ini fokus pada **perhitungan & menampilkan rekomendasi transaksi pelunasan** (read-only, on-the-fly) dari saldo bersih. Fitur ini **tidak** menyimpan, menandai lunas, atau mencatat pembayaran nyata — itu didetailkan pada fitur terpisah **Mark Settlement as Paid**. Fitur ini **mengkonsumsi kontrak** dari Balance Calculation (`BalanceUnit.balance` per pihak) dan **tidak mengubah** data apa pun. Satuan pihak = **unit** (member individual + grup), konsisten dengan Balance (grup = 1 pihak, anggota se-grup tidak saling membayar).
@@ -2087,6 +2262,7 @@ Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calc
 ### 9.2 Scope MVP
 
 **Termasuk dalam MVP:**
+
 - Perhitungan settlement **on-the-fly** dari `TripBalanceSummary` (tanpa menyimpan hasil / tanpa tabel baru)
 - Algoritma **minimisasi jumlah transfer** (greedy: cocokkan utang terbesar dengan piutang terbesar) menghasilkan **≤ (jumlah pihak − 1)** transaksi
 - Tiap transaksi memuat: pihak pembayar (`from`), pihak penerima (`to`), dan nominal (minor unit)
@@ -2099,6 +2275,7 @@ Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calc
 - Invarian: `Σ nominal transaksi === Σ saldo positif (piutang) === Σ |saldo negatif| (utang)`; setelah seluruh transaksi diterapkan, semua saldo menjadi 0
 
 **Tidak termasuk MVP (future):**
+
 - Tandai transaksi sebagai **lunas** / catat pembayaran nyata → **Mark Settlement as Paid**
 - Pelunasan parsial / cicil sebagian transaksi
 - Penyesuaian manual / override siapa-bayar-siapa
@@ -2116,13 +2293,14 @@ Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calc
 - Tidak ada Prisma write; perubahan expense / grup langsung tercermin pada rekomendasi tanpa migrasi data
 
 **Catatan:**
+
 - Karena murni dihitung ulang, settlement selalu sinkron dengan saldo terbaru.
 - (Future) saat fitur **Mark as Paid** dibuat, baru ditambahkan tabel `Settlement` (mis. `tripId`, `fromUnit`, `toUnit`, `amount`, `paidAt`, `status`) untuk mencatat pelunasan nyata — di luar scope MVP ini.
 
 ### 9.4 Halaman / Route
 
-| Route | Tipe | Akses | Deskripsi |
-|---|---|---|---|
+| Route         | Tipe      | Akses       | Deskripsi                                                                        |
+| ------------- | --------- | ----------- | -------------------------------------------------------------------------------- |
 | `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section "Pelunasan" (daftar transaksi yang disarankan) |
 
 > Mengikuti pola fitur sebelumnya (Server Component memanggil service langsung, project belum memakai React Query), **tidak dibuat endpoint API baru**. Section pelunasan dirender di Server Component detail trip via service `getTripSettlement(tripId)`. Endpoint `GET /api/trips/[id]/settlement` **opsional di masa depan** bila dibutuhkan fetch client-side (mis. saat Mark as Paid).
@@ -2130,6 +2308,7 @@ Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calc
 ### 9.5 User Flow
 
 #### A. Flow Lihat Pelunasan (semua member)
+
 1. Member membuka `/trips/[id]`
 2. Server Component memanggil `getTripSettlement(tripId)` (setelah `assertTripMember`)
 3. Section "Pelunasan" menampilkan daftar transaksi yang disarankan, tiap baris: **nama/badge pihak pembayar → nama/badge pihak penerima : nominal terformat**
@@ -2137,21 +2316,25 @@ Mengubah **saldo bersih per pihak** (hasil [Balance Calculation](#8-balance-calc
 5. Urutan tampil deterministik (mis. nominal desc, tie-break by nama pembayar lalu penerima)
 
 #### B. Flow Empty / Zero State
+
 1. Belum ada expense → empty state "Belum ada pengeluaran" + CTA "Tambah Pengeluaran"
 2. Ada expense tapi semua saldo impas → info "Semua sudah impas, tidak ada yang perlu dibayar"
 
 #### C. Flow Trip Diarsipkan
+
 1. Trip `ARCHIVED` → rekomendasi tetap dihitung & ditampilkan (read-only), tanpa CTA tambah expense
 
 ### 9.6 Technical Flow
 
 **Stack:**
+
 - Server Component untuk render section pelunasan (initial fetch via service langsung)
 - Tanpa Client Component / hook mutation (read-only)
 - Reuse `getTripBalances` (Balance Calculation) sebagai sumber saldo, `getCurrentMember`/`assertTripMember`, error class `TripNotFoundError`/`TripForbiddenError`
 - **Tidak** ada Prisma write — hanya menurunkan dari saldo yang sudah dibaca
 
 **Helper inti — `calculateSettlement` (pure, deterministik, mudah dites):**
+
 ```
 type SettlementUnitLite = {
   refId: string;            // BalanceUnit.refId
@@ -2163,7 +2346,9 @@ type SettlementUnitLite = {
 
 calculateSettlement(units: SettlementUnitLite[]): SettlementTransaction[]
 ```
+
 Algoritma (greedy minimisasi transfer):
+
 1. Pisahkan unit menjadi **debtors** (`balance < 0`) dan **creditors** (`balance > 0`); abaikan yang `balance === 0`.
 2. Urutkan deterministik: debtors by `|balance|` desc (tie-break nama asc), creditors by `balance` desc (tie-break nama asc) — agar hasil stabil.
 3. Selama masih ada debtor & creditor:
@@ -2174,6 +2359,7 @@ Algoritma (greedy minimisasi transfer):
 4. Kembalikan daftar transaksi.
 
 **Invarian wajib (diuji):**
+
 - `Σ amount transaksi === Σ saldo positif === Σ |saldo negatif|`
 - Setelah semua transaksi diterapkan ke saldo awal → semua saldo = 0
 - Jumlah transaksi ≤ `(jumlah pihak non-impas − 1)`
@@ -2181,10 +2367,12 @@ Algoritma (greedy minimisasi transfer):
 - Karena `Σ balance === 0` (dijamin Balance Calculation), proses selalu konvergen
 
 **Service — `getTripSettlement(tripId, userId)`:**
+
 - Reuse `getTripBalances(tripId, userId)` (sudah meng-assert member + menghitung saldo)
 - Map `units` → input `calculateSettlement` → kembalikan `TripSettlementSummary` (currency, totalSettlement, transactions)
 
 **Struktur file (diusulkan — perlu konfirmasi pembuatan folder `features/settlement`):**
+
 ```
 src/
   app/
@@ -2204,6 +2392,7 @@ src/
 ```
 
 **Tambahan tipe (`src/types/settlement.ts`):**
+
 ```
 export interface SettlementParty {
   refId: string;            // BalanceUnit.refId (TripMember.id atau MemberGroup.id)
@@ -2227,16 +2416,19 @@ export interface TripSettlementSummary {
 ```
 
 **Authorization rules:**
+
 - Akses pelunasan = **member trip** (`assertTripMember`, lewat reuse `getTripBalances`). Tidak ada aksi mutasi → tidak ada cek OWNER.
 - Tidak membocorkan data sensitif tambahan (hanya turunan dari saldo yang sudah boleh dilihat member).
 
 **Error handling:**
+
 - 401 belum login
 - 404 trip tidak ditemukan atau pengakses bukan member
 - Jangan expose raw error database
 - Saldo yang tidak konvergen (anomali `Σ balance ≠ 0`) → diperlakukan defensif: hentikan loop saat salah satu sisi habis, sisa diabaikan tanpa crash, dan dicatat sebagai edge case future
 
 ### 9.7 Dependencies & Environment
+
 - **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
 - Formatting nominal memakai helper currency existing (`Intl.NumberFormat` sesuai `Trip.currency`).
 
@@ -2261,20 +2453,25 @@ export interface TripSettlementSummary {
 ### 9.9 Checklist Implementasi
 
 **Database:**
+
 - [x] Tidak ada perubahan schema / migration (read-only)
 
 **Types:**
+
 - [x] Buat `src/types/settlement.ts` (`SettlementParty`, `SettlementTransaction`, `TripSettlementSummary`)
 
 **Service Layer:**
+
 - [x] `calculateSettlement` (helper pure: greedy minimisasi transfer, deterministik, invarian saldo akhir = 0)
 - [x] `getTripSettlement` (reuse `getTripBalances` + map unit + calculate)
 
 **UI:**
+
 - [x] Sisipkan `SettlementSection` di `/trips/[id]`
 - [x] `SettlementSection` (satu komponen: daftar transaksi + empty/zero state) — disederhanakan, anti over-engineering
 
 **QA (manual):**
+
 - [ ] Test settlement dasar (beberapa debtor & creditor) — arah & nominal benar
 - [ ] Test dengan grup (grup sebagai pembayar / penerima)
 - [ ] Test jumlah transaksi minimal (mis. 3 orang → ≤ 2 transaksi)
@@ -2293,6 +2490,374 @@ export interface TripSettlementSummary {
 
 ---
 
-## Fitur Berikutnya
+## 10. Trip Summary (MVP)
 
-- [ ] Trip Summary
+### 10.1 Tujuan
+
+Memberikan **ringkasan cepat kondisi sebuah trip** dalam satu section yang mudah dipindai: total pengeluaran, jumlah transaksi, jumlah member, rentang tanggal, kategori pengeluaran terbesar, status saldo/pelunasan, dan insight sederhana agar member langsung paham "trip ini sudah sejauh apa dan uangnya habis untuk apa".
+
+> Catatan ruang lingkup: fitur ini fokus pada **agregasi insight read-only** dari data trip yang sudah ada. Trip Summary **tidak menggantikan** Expense List, Balance, atau Settlement; ia merangkum ketiganya menjadi snapshot tingkat atas. Perhitungan tetap **on-the-fly**, tanpa menyimpan snapshot atau membuat tabel baru. Visualisasi dibuat sederhana untuk MVP (stat cards + breakdown list/progress bar ringan), sedangkan chart interaktif/export masuk future.
+
+### 10.2 Scope MVP
+
+**Termasuk dalam MVP:**
+
+- Section "Ringkasan Trip" di halaman detail trip (`/trips/[id]`) untuk semua member
+- Total pengeluaran trip (`totalExpense`) dari seluruh `Expense.amount`
+- Jumlah pengeluaran (`expenseCount`)
+- Jumlah pihak/member yang aktif dalam trip:
+  - `memberCount` = jumlah `TripMember`
+  - `groupCount` = jumlah `MemberGroup`
+  - optional label "x grup, y member individual"
+- Rentang tanggal trip:
+  - memakai `Trip.startDate` dan `Trip.endDate` bila tersedia
+  - fallback rentang tanggal expense (`min(expense.date)` sampai `max(expense.date)`) untuk konteks aktivitas
+- Rata-rata pengeluaran:
+  - `averageExpenseAmount = totalExpense / expenseCount`
+  - `averagePerMember = totalExpense / memberCount` sebagai angka konteks, bukan angka tagihan final
+- Breakdown kategori:
+  - total per `ExpenseCategory`
+  - jumlah transaksi per kategori
+  - kategori terbesar (`topCategory`) berdasarkan total nominal
+- Breakdown split type:
+  - jumlah expense per `SplitType` (`EQUAL`, `EXACT`, `PERCENTAGE`, `SHARE`)
+  - berguna untuk melihat kompleksitas pembagian biaya
+- Ringkasan saldo:
+  - jumlah pihak berpiutang
+  - jumlah pihak berutang
+  - jumlah pihak impas
+  - nominal settlement total dari `TripSettlementSummary.totalSettlement`
+- Aktivitas terakhir:
+  - expense terbaru (`latestExpense`) berisi title, amount, date, category
+  - `lastExpenseAt` untuk label "terakhir dicatat ..."
+- Empty state saat belum ada expense
+- Format nominal sesuai `Trip.currency`
+- Trip `ARCHIVED` tetap menampilkan summary (read-only)
+
+**Tidak termasuk MVP (future):**
+
+- Chart interaktif kompleks (line chart harian, pie chart interaktif, drilldown)
+- Filter summary berdasarkan tanggal/kategori/member
+- Export summary ke PDF/CSV
+- Snapshot historis summary per waktu
+- Multi-currency conversion
+- Budgeting / limit pengeluaran
+- Prediksi atau rekomendasi berbasis AI
+- Ringkasan lintas trip di dashboard utama
+- Summary privat per user (mis. "pengeluaran saya saja")
+
+### 10.3 Entity / Data Model (Prisma)
+
+**Tidak menambah tabel, kolom, atau migration apa pun.** Summary dihitung dari data existing:
+
+- `Trip`:
+  - `name`, `description`, `startDate`, `endDate`, `currency`, `status`
+- `TripMember`:
+  - jumlah member, status guest/user, relasi grup
+- `MemberGroup`:
+  - jumlah grup dan komposisi pihak
+- `Expense`:
+  - `amount`, `date`, `category`, `splitType`, `paidById`
+- Output fitur sebelumnya:
+  - `TripBalanceSummary` untuk ringkasan pihak berutang/piutang/impas
+  - `TripSettlementSummary` untuk total nominal pelunasan yang disarankan
+
+**Catatan:**
+
+- Semua angka nominal disimpan dan dihitung dalam **minor unit** (`Int`) mengikuti pola expense saat ini.
+- `averagePerMember` hanya metrik kasar; tagihan aktual tetap mengacu pada `BalanceSection` karena ada split custom dan grup.
+- Perubahan expense, member, grup, balance, atau settlement langsung tercermin pada summary karena dihitung ulang saat page render.
+
+### 10.4 Halaman / Route
+
+| Route         | Tipe      | Akses       | Deskripsi                                                                       |
+| ------------- | --------- | ----------- | ------------------------------------------------------------------------------- |
+| `/trips/[id]` | Protected | Member only | Detail trip — menampilkan section "Ringkasan Trip" di bagian atas konten detail |
+
+> Mengikuti pola Balance & Settlement, **tidak dibuat endpoint API baru** untuk MVP. Section summary dirender di Server Component detail trip via service `getTripSummary(tripId, userId)`. Endpoint `GET /api/trips/[id]/summary` opsional di masa depan bila dibutuhkan refresh client-side/filtering.
+
+### 10.5 User Flow
+
+#### A. Flow Lihat Ringkasan Trip
+
+1. Member membuka `/trips/[id]`
+2. Server Component memanggil `getTripSummary(tripId, userId)` setelah akses trip valid
+3. Section "Ringkasan Trip" tampil dekat bagian atas halaman, idealnya setelah `TripHeader`/actions dan sebelum section detail yang lebih panjang
+4. User melihat stat utama:
+   - total pengeluaran
+   - jumlah expense
+   - jumlah member/grup
+   - rata-rata expense
+5. User melihat insight ringkas:
+   - kategori terbesar
+   - expense terbaru
+   - status saldo/pelunasan
+6. User bisa lanjut scroll ke Expense, Balance, dan Settlement untuk detail penuh
+
+#### B. Flow Empty State
+
+1. Belum ada expense → tampilkan summary ringan:
+   - total pengeluaran `0`
+   - jumlah expense `0`
+   - member tetap tampil
+   - kategori terbesar kosong
+2. Jika trip masih `ACTIVE`, tampilkan CTA kecil "Tambah Pengeluaran"
+3. Jika trip `ARCHIVED`, tampilkan info read-only tanpa CTA
+
+#### C. Flow Trip Diarsipkan
+
+1. Trip `ARCHIVED` → summary tetap dihitung dan ditampilkan
+2. Tidak ada CTA mutasi
+3. Copy UI menekankan bahwa data adalah ringkasan final/read-only
+
+### 10.6 Technical Flow
+
+**Stack:**
+
+- Server Component untuk render section summary
+- Service read-only, tanpa mutation/hook client
+- Reuse helper/service existing sebisa mungkin:
+  - `getTripById` atau query trip yang sudah meng-assert member
+  - `getExpensesByTripId` bila cukup efisien, atau query Prisma khusus summary
+  - `getTripBalances`
+  - `getTripSettlement`
+- **Tidak** ada Prisma write
+
+**Helper inti — `calculateTripSummary` (pure, deterministik, mudah dites):**
+
+```
+type TripSummaryTripLite = {
+  id: string;
+  currency: string;
+  status: "ACTIVE" | "ARCHIVED";
+  startDate: Date;
+  endDate: Date | null;
+};
+
+type TripSummaryExpenseLite = {
+  id: string;
+  title: string;
+  amount: number;
+  date: Date;
+  category: ExpenseCategory;
+  splitType: SplitType;
+};
+
+calculateTripSummary(input: {
+  trip: TripSummaryTripLite;
+  memberCount: number;
+  groupCount: number;
+  expenses: TripSummaryExpenseLite[];
+  balances: TripBalanceSummary;
+  settlement: TripSettlementSummary;
+}): TripSummary
+```
+
+Algoritma:
+
+1. Hitung `totalExpense = Σ expense.amount`.
+2. Hitung `expenseCount = expenses.length`.
+3. Hitung `averageExpenseAmount`:
+   - jika `expenseCount > 0` → pembulatan integer `Math.round(totalExpense / expenseCount)`
+   - jika kosong → `0`
+4. Hitung `averagePerMember`:
+   - jika `memberCount > 0` → `Math.round(totalExpense / memberCount)`
+   - jika kosong → `0`
+5. Agregasi kategori:
+   - group by `category`
+   - tiap kategori punya `totalAmount`, `expenseCount`, `percentage`
+   - `percentage = totalAmount / totalExpense * 100`, fallback `0`
+   - urutkan total terbesar desc, tie-break category asc
+6. Agregasi split type:
+   - count per `splitType`
+   - urut deterministik sesuai enum (`EQUAL`, `EXACT`, `PERCENTAGE`, `SHARE`)
+7. Tentukan `topCategory` dari breakdown kategori pertama.
+8. Tentukan `latestExpense` dari expense dengan `date` terbaru; tie-break `title` asc agar stabil.
+9. Hitung status saldo:
+   - `creditorCount = balances.units.filter(balance > 0).length`
+   - `debtorCount = balances.units.filter(balance < 0).length`
+   - `settledCount = balances.units.filter(balance === 0).length`
+   - `settlementTransactionCount = settlement.transactions.length`
+   - `totalSettlement = settlement.totalSettlement`
+10. Tentukan `activityDateRange`:
+
+- jika ada expense → min/max `expense.date`
+- jika tidak ada → `null`
+
+**Service — `getTripSummary(tripId, userId)`:**
+
+- Pastikan pengakses adalah member trip
+- Ambil trip, member count, group count, expenses ringkas
+- Reuse `getTripBalances(tripId, userId)` dan `getTripSettlement(tripId, userId)`
+- Panggil `calculateTripSummary(...)`
+- Kembalikan `TripSummary`
+
+**Struktur file (diusulkan):**
+
+```
+src/
+  app/
+    (protected)/
+      trips/
+        [id]/
+          page.tsx                       # sisipkan <TripSummarySection />
+  features/
+    summary/
+      components/
+        TripSummarySection.tsx           # stat cards + insight list
+        CategoryBreakdown.tsx            # breakdown kategori ringkas
+      services/
+        calculateTripSummary.ts          # helper pure
+        getTripSummary.ts                # fetch data + reuse balance/settlement + calculate
+  types/
+    summary.ts                           # TripSummary, CategorySummary, SplitTypeSummary
+```
+
+**Tambahan tipe (`src/types/summary.ts`):**
+
+```
+export interface CategorySummary {
+  category: ExpenseCategory;
+  totalAmount: number;       // minor unit
+  expenseCount: number;
+  percentage: number;        // 0..100
+}
+
+export interface SplitTypeSummary {
+  splitType: SplitType;
+  expenseCount: number;
+}
+
+export interface TripSummaryLatestExpense {
+  id: string;
+  title: string;
+  amount: number;
+  date: Date;
+  category: ExpenseCategory;
+}
+
+export interface TripSummary {
+  currency: string;
+  tripStatus: "ACTIVE" | "ARCHIVED";
+  totalExpense: number;
+  expenseCount: number;
+  memberCount: number;
+  groupCount: number;
+  averageExpenseAmount: number;
+  averagePerMember: number;
+  tripDateRange: {
+    startDate: Date;
+    endDate: Date | null;
+  };
+  activityDateRange: {
+    startDate: Date;
+    endDate: Date;
+  } | null;
+  categories: CategorySummary[];
+  topCategory: CategorySummary | null;
+  splitTypes: SplitTypeSummary[];
+  latestExpense: TripSummaryLatestExpense | null;
+  balanceOverview: {
+    creditorCount: number;
+    debtorCount: number;
+    settledCount: number;
+    settlementTransactionCount: number;
+    totalSettlement: number;
+  };
+}
+```
+
+**UI composition:**
+
+- `TripSummarySection` sebaiknya compact dan mudah discan:
+  - 2-4 stat cards utama: Total, Expense, Member, Settlement
+  - kategori terbesar + breakdown ringkas
+  - expense terakhir
+  - status saldo singkat
+- Hindari chart berat di MVP; progress bar kategori cukup.
+- Jika layout mobile, stat cards menjadi 2 kolom atau 1 kolom sesuai ruang.
+
+**Authorization rules:**
+
+- Akses summary = **member trip**.
+- Tidak ada aksi mutasi → tidak ada cek OWNER.
+- Summary hanya menampilkan agregat dari data yang memang sudah boleh dilihat member.
+
+**Error handling:**
+
+- 401 belum login
+- 404 trip tidak ditemukan atau pengakses bukan member
+- Jangan expose raw error database
+- Jika ada anomali data kategori/split type, fallback tampil sebagai `OTHER`/label aman tanpa crash
+
+### 10.7 Dependencies & Environment
+
+- **Tidak ada dependency baru** dan **tidak ada environment variable baru**.
+- Formatting nominal memakai helper currency existing (`Intl.NumberFormat` sesuai `Trip.currency`).
+- Untuk tanggal, gunakan formatter existing bila ada; jika belum, cukup `Intl.DateTimeFormat`.
+
+### 10.8 Acceptance Criteria MVP
+
+- [ ] Summary dihitung on-the-fly tanpa tabel/penyimpanan baru
+- [ ] Section "Ringkasan Trip" tampil di detail trip untuk semua member
+- [ ] Total pengeluaran dan jumlah expense benar
+- [ ] Jumlah member dan grup benar
+- [ ] Rata-rata per expense dan rata-rata kasar per member benar
+- [ ] Rentang tanggal trip tampil benar
+- [ ] Rentang aktivitas expense tampil jika ada expense
+- [ ] Breakdown kategori berisi total, count, percentage, dan urutan terbesar
+- [ ] Kategori terbesar tampil jelas
+- [ ] Breakdown split type menampilkan count tiap tipe split
+- [ ] Expense terbaru tampil benar
+- [ ] Ringkasan saldo menampilkan jumlah pihak berutang/berpiutang/impas
+- [ ] Total settlement dan jumlah transaksi settlement tampil benar
+- [ ] Empty state saat belum ada expense
+- [ ] Trip archived tetap menampilkan summary read-only
+- [ ] Non-member tidak bisa melihat summary (404)
+- [ ] Nominal terformat sesuai currency trip
+- [ ] Mobile-friendly dan mudah dipindai
+- [ ] Dark mode support
+
+### 10.9 Checklist Implementasi
+
+**Database:**
+
+- [x] Tidak ada perubahan schema / migration (read-only)
+
+**Types:**
+
+- [x] Buat `src/types/summary.ts` (`TripSummary`, `CategorySummary`, `SplitTypeSummary`)
+
+**Service Layer:**
+
+- [x] `calculateTripSummary` (helper pure: agregasi total, kategori, split type, latest expense, overview saldo)
+- [x] `getTripSummary` (assert member + query data ringkas + reuse balance/settlement + calculate)
+
+**UI:**
+
+- [x] Sisipkan `TripSummarySection` di `/trips/[id]`, setelah header/actions dan sebelum group/expense list
+- [x] `TripSummarySection` (stat cards + insight ringkas + empty state)
+- [~] ~~`CategoryBreakdown`~~ — digabung ke `TripSummarySection` agar sederhana
+- [x] Pastikan copy membedakan `averagePerMember` sebagai metrik kasar, bukan tagihan final
+
+**QA (manual):**
+
+- [ ] Test trip tanpa expense
+- [ ] Test trip dengan 1 expense
+- [ ] Test banyak kategori → urutan dan percentage benar
+- [ ] Test banyak split type → count benar
+- [ ] Test dengan grup → member/group count benar
+- [ ] Test summary saldo mengikuti Balance/Settlement
+- [ ] Test trip archived (summary read-only tampil)
+- [ ] Test non-member (404)
+- [ ] Test dark mode & layout mobile
+
+### 10.10 Status
+
+**Current status:** Implementasi MVP sederhana selesai — QA manual/build menunggu
+**Target selesai:** TBD
+**Catatan:** Bergantung pada data dari [Add Expense](#5-add-expense-mvp), [Group Member](#6-group-member-mvp), [Split Expense Logic](#7-split-expense-logic-mvp), [Balance Calculation](#8-balance-calculation-mvp), dan [Settlement Calculation](#9-settlement-calculation-mvp). Setelah selesai, halaman detail trip akan punya snapshot cepat sebelum user membaca detail expense/balance/settlement.
+
+---
+
+## Fitur Berikutnya

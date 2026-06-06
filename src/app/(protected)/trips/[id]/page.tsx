@@ -14,6 +14,8 @@ import { BalanceSection } from "@/features/balance/components/BalanceSection";
 import { getTripBalances } from "@/features/balance/services/getTripBalances";
 import { SettlementSection } from "@/features/settlement/components/SettlementSection";
 import { getTripSettlement } from "@/features/settlement/services/getTripSettlement";
+import { TripSummarySection } from "@/features/summary/components/TripSummarySection";
+import { getTripSummary } from "@/features/summary/services/getTripSummary";
 import { requireSessionUser } from "@/lib/auth/getSessionUser";
 
 interface TripDetailPageProps {
@@ -39,6 +41,7 @@ export default async function TripDetailPage({
   const groupData = await getTripGroups(id, user.id);
   const balances = await getTripBalances(id, user.id);
   const settlement = await getTripSettlement(id, user.id);
+  const summary = await getTripSummary(id, user.id, { balances, settlement });
 
   return (
     <main className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 py-8">
@@ -51,6 +54,8 @@ export default async function TripDetailPage({
       {isOwner ? <TripActionsMenu trip={trip} /> : null}
 
       {isOwner ? <TripInvitePanel trip={trip} /> : null}
+
+      <TripSummarySection summary={summary} />
 
       <GroupSection tripId={trip.id} data={groupData} />
 
