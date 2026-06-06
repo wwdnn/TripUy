@@ -13,6 +13,7 @@ model Trip {
 
   createdBy User         @relation(fields: [createdById], references: [id])
   members   TripMember[]
+  expenses  Expense[]
 
   @@index([createdById])
   @@index([status])
@@ -28,8 +29,11 @@ model TripMember {
   role      TripRole @default(MEMBER)
   joinedAt  DateTime @default(now())
 
-  trip Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  user User? @relation(fields: [userId], references: [id])
+  trip            Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user            User?          @relation(fields: [userId], references: [id])
+  expensesPaid    Expense[]      @relation("ExpensePaidBy")
+  expensesCreated Expense[]      @relation("ExpenseCreatedBy")
+  shares          ExpenseShare[]
 
   @@unique([tripId, userId])
   @@unique([tripId, guestId])
